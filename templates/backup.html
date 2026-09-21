@@ -1,22 +1,98 @@
 {% extends "base.html" %}
 {% block title %}Database Backup – ADUFARMS{% endblock %}
 {% block content %}
-<h2>DATABASE BACKUP (ADMIN ONLY)</h2>
-<p class="text-muted">Timestamped backups are stored in <code>backups/</code> outside staff-accessible areas. A safety backup is created before every restore and migration. Backup files are never served directly.</p>
-<div class="card mb-3"><div class="card-body">
-<form method="post" action="{{ url_for('admin_backup') }}">{{ csrf_input() }}
-<button class="btn btn-primary" type="submit"><i class="bi bi-database"></i> CREATE MANUAL BACKUP</button>
-</form>
-</div></div>
-<div class="card"><div class="card-body">
-<h5>Available backups ({{ backups|length }})</h5>
-<div class="table-responsive"><table class="table">
-<thead><tr><th>Filename</th><th>Created</th><th>Size (bytes)</th><th>Action</th></tr></thead>
-<tbody>
-{% for b in backups %}
-<tr><td>{{ b.name }}</td><td>{{ b.mtime }}</td><td>{{ b.size }}</td>
-<td><form method="post" action="{{ url_for('admin_restore') }}" onsubmit="return confirm('Restore {{ b.name }}? A safety backup of the current database will be kept.');">{{ csrf_input() }}<input type="hidden" name="backup_name" value="{{ b.name }}"><button class="btn btn-sm btn-warning" type="submit">RESTORE</button></form></td></tr>
-{% else %}<tr><td colspan="4">No backups yet.</td></tr>{% endfor %}
-</tbody></table></div>
-</div></div>
+<div class="dashboard-heading">
+  <div>
+    <span class="eyebrow"><i class="bi bi-database-check"></i> SYSTEM MAINTENANCE</span>
+    <h2>Database Backup &amp; Recovery</h2>
+    <p>Automated and manual database snapshots stored securely outside web access paths.</p>
+  </div>
+  <form method="post" action="{{ url_for('admin_backup') }}">
+    {{ csrf_input() }}
+    <button class="btn btn-primary" type="submit">
+      <i class="bi bi-database-add me-1"></i> Create Manual Backup
+    </button>
+  </form>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-4">
+    <div class="card stat-card h-100">
+      <div class="card-body">
+        <div class="stat-label">Total Backups</div>
+        <div class="stat-value">{{ backups|length }}</div>
+        <div class="stat-support">Stored in secure backup vault</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card stat-card h-100">
+      <div class="card-body">
+        <div class="stat-label">Backup Protection</div>
+        <div class="stat-value text-success"><i class="bi bi-shield-lock-fill me-1"></i> Enabled</div>
+        <div class="stat-support">Pre-restore &amp; migration auto-snapshots</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card stat-card h-100">
+      <div class="card-body">
+        <div class="stat-label">Storage Format</div>
+        <div class="stat-value">SQLite DB</div>
+        <div class="stat-support">Zero data loss SQLite backup API</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="alert alert-info d-flex align-items-start gap-3 mb-3">
+  <i class="bi bi-info-circle-fill fs-5 mt-1"></i>
+  <div>
+    <strong>Safe Recovery Guarantee</strong>
+    <p class="mb-0 small">A safety snapshot is automatically created before any database restoration. Restoring a backup immediately switches active database records to that point in time.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <div class="panel-title">
+      <h5>Available Backups ({{ backups|length }})</h5>
+      <div class="table-tools mb-0">
+        <input class="form-control form-control-sm" data-table-search="#backupsTable" placeholder="Search backups...">
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table id="backupsTable" class="table table-hover table-sm sortable">
+        <thead>
+          <tr>
+            <th data-sort>Backup Filename</th>
+            <th data-sort>Created Date</th>
+            <th data-sort class="text-end">Size</th>
+            <th class="text-end">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for b in backups %}
+          <tr>
+            <td><code><i class="bi bi-file-earmark-binary me-1"></i>{{ b.name }}</code></td>
+            <td><span class="fw-semibold">{{ b.mtime }}</span></td>
+            <td class="text-end text-muted">{{ "{:,.1f}".format(b.size / 1024) }} KB</td>
+            <td class="text-end">
+              <form method="post" action="{{ url_for('admin_restore') }}" class="d-inline" onsubmit="return confirm('Restore {{ b.name }}? A safety backup of the current database will be saved first.');">
+                {{ csrf_input() }}
+                <input type="hidden" name="backup_name" value="{{ b.name }}">
+                <button class="btn btn-sm btn-outline-warning" type="submit">
+                  <i class="bi bi-arrow-counterclockwise me-1"></i>Restore
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4"><div class="empty-state"><i class="bi bi-database"></i>No database backups recorded yet.</div></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
 {% endblock %}

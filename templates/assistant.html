@@ -1,12 +1,55 @@
 {% extends "base.html" %}
-{% block title %}AI Assistant - ADUFARMS{% endblock %}
+{% block title %}AI Agribusiness Assistant - ADUFARMS{% endblock %}
 {% block content %}
 <section class="assistant-page">
-  <div class="dashboard-heading"><div><span class="eyebrow"><i class="bi bi-stars"></i> VERIFIED BUSINESS ASSISTANT</span><h2>Ask ADUFARMS</h2><p>Answers are calculated from the current database. No unverified financial figures are generated.</p></div></div>
-  <div class="card assistant-card"><div class="card-body">
-    <form method="get" class="assistant-form"><label class="form-label" for="assistantQuestion">Business question</label><div class="input-group"><input id="assistantQuestion" name="question" value="{{ question }}" class="form-control" placeholder="How much maize is currently available?" required><button class="btn btn-primary" type="submit"><i class="bi bi-send me-1"></i>Ask</button></div></form>
-    <div class="assistant-suggestions"><span>Try:</span><a href="{{ url_for('assistant', question='How much maize is currently available?') }}">Current stock</a><a href="{{ url_for('assistant', question='Who owes ADUFARMS the most?') }}">Outstanding balances</a><a href="{{ url_for('assistant', question="What were our sales today?") }}">Today's activity</a></div>
-  </div></div>
-  {% if result %}<div class="card assistant-result mt-3"><div class="card-body"><span class="eyebrow">DATABASE FACT</span><h3>{{ result.title }}</h3><p>{{ result.answer }}</p>{% if result.facts %}<ul>{% for fact in result.facts %}<li>{{ fact }}</li>{% endfor %}</ul>{% endif %}</div></div>{% endif %}
+  <div class="dashboard-heading">
+    <div>
+      <span class="eyebrow"><i class="bi bi-stars"></i> VERIFIED BUSINESS INTELLIGENCE</span>
+      <h2>Ask ADUFARMS Agribusiness Assistant</h2>
+      <p>Calculated directly from live database records. Fast, accurate, and 100% verified answers.</p>
+    </div>
+  </div>
+
+  <div class="card assistant-card">
+    <div class="card-body">
+      <form method="get" class="assistant-form">
+        <label class="form-label" for="assistantQuestion">Ask any operational or financial question</label>
+        <div class="input-group">
+          <span class="input-group-text"><i class="bi bi-search"></i></span>
+          <input id="assistantQuestion" name="question" value="{{ question }}" class="form-control" placeholder="e.g. How much maize stock and bags are available?" required>
+          <button class="btn btn-primary px-4" type="submit"><i class="bi bi-send-fill me-1"></i> Ask Assistant</button>
+        </div>
+      </form>
+      <div class="assistant-suggestions mt-3">
+        <span class="fw-bold text-muted small"><i class="bi bi-lightbulb me-1 text-warning"></i> Quick prompts:</span>
+        <a href="{{ url_for('assistant', question='How much maize is currently available?') }}" class="btn btn-sm btn-outline-secondary rounded-pill me-1 mb-1">🌽 Available Stock &amp; Bags</a>
+        <a href="{{ url_for('assistant', question='Who owes ADUFARMS the most?') }}" class="btn btn-sm btn-outline-secondary rounded-pill me-1 mb-1">💰 Outstanding Balances</a>
+        <a href="{{ url_for('assistant', question='What is our estimated gross profit?') }}" class="btn btn-sm btn-outline-secondary rounded-pill me-1 mb-1">📈 Profit &amp; Margin</a>
+        <a href="{{ url_for('assistant', question='What was our total procurement?') }}" class="btn btn-sm btn-outline-secondary rounded-pill me-1 mb-1">📦 Procurement Summary</a>
+        <a href="{{ url_for('assistant', question='Who are our top customers?') }}" class="btn btn-sm btn-outline-secondary rounded-pill me-1 mb-1">👥 Top Customers</a>
+        <a href="{{ url_for('assistant', question='What is our activity this month?') }}" class="btn btn-sm btn-outline-secondary rounded-pill me-1 mb-1">📅 Monthly Overview</a>
+      </div>
+    </div>
+  </div>
+
+  {% if result %}
+  <div class="card assistant-result mt-4 border-start border-4 border-warning shadow-sm">
+    <div class="card-body p-4">
+      <span class="eyebrow text-warning"><i class="bi bi-check-circle-fill me-1"></i> VERIFIED DATABASE INSIGHT</span>
+      <h3 class="mt-2 mb-3">{{ result.title }}</h3>
+      <p class="fs-5 fw-medium text-dark">{{ result.answer }}</p>
+      {% if result.facts %}
+      <div class="mt-3 pt-3 border-top">
+        <h6 class="text-muted text-uppercase small fw-bold mb-2"><i class="bi bi-list-check me-1"></i> Key Supporting Data:</h6>
+        <ul class="list-group list-group-flush">
+          {% for fact in result.facts %}
+          <li class="list-group-item px-0 py-2 bg-transparent text-muted"><i class="bi bi-chevron-right text-warning me-2"></i>{{ fact }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
 </section>
 {% endblock %}

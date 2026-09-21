@@ -1,11 +1,226 @@
 {% extends "base.html" %}
-{% block title %}Deleted Records - ADUFARMS{% endblock %}
+{% block title %}Recycle Bin &amp; Deleted Records - ADUFARMS{% endblock %}
 {% block content %}
-<div class="dashboard-heading"><div><h2>Recycle bin</h2><p>Recoverable Admin-deleted records. Financial history remains auditable.</p></div></div>
-{% macro restore_form(action, label) %}<form method="post" action="{{ action }}" class="d-inline" onsubmit="return confirm('Restore this record and its related history?');">{{ csrf_input() }}<input type="hidden" name="reason" value="Admin restoration"><button class="btn btn-sm btn-outline-success">{{ label or 'Restore' }}</button></form>{% endmacro %}
-{% macro purge_form(action) %}<form method="post" action="{{ action }}" class="d-inline" onsubmit="return confirm('Permanently delete this customer and every related record? This cannot be undone.');">{{ csrf_input() }}<input type="hidden" name="reason" value="Admin permanent deletion"><button class="btn btn-sm btn-outline-danger">Permanent delete</button></form>{% endmacro %}
-<div class="card mb-3"><div class="card-body"><h5>Deleted customers</h5><div class="table-responsive"><table class="table table-sm"><thead><tr><th>Customer</th><th>Deleted by</th><th>Date</th><th>Reason</th><th>Action</th></tr></thead><tbody>{% for row in customers %}<tr><td>{{ row.name }}</td><td>{{ row.deleted_by }}</td><td>{{ row.deleted_at|pretty_date }}</td><td>{{ row.deletion_reason or '-' }}</td><td>{{ restore_form(url_for('restore_customer', customer_id=row.id), 'Restore everything') }} {{ purge_form(url_for('permanently_delete_customer', customer_id=row.id)) }}</td></tr>{% else %}<tr><td colspan="5">No deleted customers.</td></tr>{% endfor %}</tbody></table></div></div></div>
-<div class="card mb-3"><div class="card-body"><h5>Deleted sales</h5><div class="table-responsive"><table class="table table-sm"><thead><tr><th>Sales ID</th><th>Invoice</th><th>Customer</th><th>Deleted by</th><th>Reason</th><th>Action</th></tr></thead><tbody>{% for row in sales %}<tr><td>{{ row.sales_id }}</td><td>{{ row.invoice_number or '-' }}</td><td>{{ row.customer_name }}</td><td>{{ row.deleted_by }}</td><td>{{ row.deletion_reason or '-' }}</td><td>{{ restore_form(url_for('restore_record', table='sales', record_id=row.id)) }}</td></tr>{% else %}<tr><td colspan="6">No deleted sales.</td></tr>{% endfor %}</tbody></table></div></div></div>
-<div class="card mb-3"><div class="card-body"><h5>Deleted payments</h5><div class="table-responsive"><table class="table table-sm"><thead><tr><th>Payment ID</th><th>Sales ID</th><th>Customer</th><th>Amount</th><th>Reason</th><th>Action</th></tr></thead><tbody>{% for row in payments %}<tr><td>{{ row.payment_id }}</td><td>{{ row.sales_id }}</td><td>{{ row.customer_name }}</td><td>{{ row.amount|money }}</td><td>{{ row.deletion_reason or '-' }}</td><td>{{ restore_form(url_for('restore_record', table='payments', record_id=row.id)) }}</td></tr>{% else %}<tr><td colspan="6">No deleted payments.</td></tr>{% endfor %}</tbody></table></div></div></div>
-<div class="card"><div class="card-body"><h5>Deleted invoices</h5><div class="table-responsive"><table class="table table-sm"><thead><tr><th>Invoice</th><th>Sales ID</th><th>Customer</th><th>Deleted by</th><th>Reason</th></tr></thead><tbody>{% for row in invoices %}<tr><td>{{ row.invoice_number }}</td><td>{{ row.sales_id }}</td><td>{{ row.customer_name }}</td><td>{{ row.deleted_by }}</td><td>{{ row.deletion_reason or '-' }}</td></tr>{% else %}<tr><td colspan="5">No deleted invoices.</td></tr>{% endfor %}</tbody></table></div></div></div>
+<div class="dashboard-heading">
+  <div>
+    <span class="eyebrow"><i class="bi bi-archive"></i> RECOVERY &amp; TRACEABILITY</span>
+    <h2>Recycle Bin &amp; Deleted Records</h2>
+    <p>Recoverable administrator-deleted records. Financial integrity and audit logs are fully preserved.</p>
+  </div>
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('audit_logs') }}"><i class="bi bi-shield-check me-1"></i>Audit Logs</a>
+</div>
+
+{% macro restore_form(action, label) %}
+<form method="post" action="{{ action }}" class="d-inline" onsubmit="return confirm('Restore this record and its related operational movements?');">
+  {{ csrf_input() }}
+  <input type="hidden" name="reason" value="Admin restoration">
+  <button class="btn btn-sm btn-outline-success">
+    <i class="bi bi-arrow-counterclockwise me-1"></i>{{ label or 'Restore' }}
+  </button>
+</form>
+{% endmacro %}
+
+{% macro purge_form(action) %}
+<form method="post" action="{{ action }}" class="d-inline" onsubmit="return confirm('Permanently purge this record? This cannot be undone.');">
+  {{ csrf_input() }}
+  <input type="hidden" name="reason" value="Admin permanent purge">
+  <button class="btn btn-sm btn-outline-danger">
+    <i class="bi bi-trash3 me-1"></i>Permanent delete
+  </button>
+</form>
+{% endmacro %}
+
+<div class="row g-3 mb-3">
+  <div class="col-6 col-md-3">
+    <div class="card stat-card h-100">
+      <div class="card-body">
+        <div class="stat-label">Deleted Purchases</div>
+        <div class="stat-value">{{ purchases|length }}</div>
+        <div class="stat-support">Inbound maize records</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card stat-card h-100">
+      <div class="card-body">
+        <div class="stat-label">Deleted Sales</div>
+        <div class="stat-value">{{ sales|length }}</div>
+        <div class="stat-support">Dispatched transactions</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card stat-card h-100">
+      <div class="card-body">
+        <div class="stat-label">Deleted Payments</div>
+        <div class="stat-value">{{ payments|length }}</div>
+        <div class="stat-support">Receipt transactions</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card stat-card h-100">
+      <div class="card-body">
+        <div class="stat-label">Deleted Customers</div>
+        <div class="stat-value">{{ customers|length }}</div>
+        <div class="stat-support">Archived accounts</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="panel-title">
+      <h5><i class="bi bi-box-seam me-1 text-warning"></i> Deleted Purchases ({{ purchases|length }})</h5>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover">
+        <thead>
+          <tr>
+            <th>Purchase ID</th>
+            <th>Date</th>
+            <th>Supplier</th>
+            <th>Quantity</th>
+            <th>Total Cost</th>
+            <th>Deleted by</th>
+            <th>Reason</th>
+            <th class="text-end">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in purchases %}
+          <tr>
+            <td><code>{{ row.purchase_id }}</code></td>
+            <td>{{ row.purchase_date|pretty_date }}</td>
+            <td><strong>{{ row.local_agent }}</strong></td>
+            <td>{{ "{:,.2f}".format(row.quantity_received_kg) }} KG</td>
+            <td>{{ row.total_cost|money }}</td>
+            <td><span class="badge bg-secondary bg-opacity-10 text-secondary border">{{ row.deleted_by or 'Admin' }}</span></td>
+            <td class="text-muted small">{{ row.deletion_reason or '-' }}</td>
+            <td class="text-end">{{ restore_form(url_for('restore_record', table='purchases', record_id=row.id), 'Restore') }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8"><div class="empty-state"><i class="bi bi-box-seam"></i>No deleted purchases.</div></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="panel-title">
+      <h5><i class="bi bi-cart3 me-1 text-primary"></i> Deleted Sales ({{ sales|length }})</h5>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover">
+        <thead>
+          <tr>
+            <th>Sales ID</th>
+            <th>Invoice</th>
+            <th>Customer</th>
+            <th>Quantity</th>
+            <th>Total Sale</th>
+            <th>Deleted by</th>
+            <th>Reason</th>
+            <th class="text-end">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in sales %}
+          <tr>
+            <td><code>{{ row.sales_id }}</code></td>
+            <td>{{ row.invoice_number or '-' }}</td>
+            <td><strong>{{ row.customer_name }}</strong></td>
+            <td>{{ "{:,.2f}".format(row.quantity_kg) }} KG</td>
+            <td>{{ row.total_sale|money }}</td>
+            <td><span class="badge bg-secondary bg-opacity-10 text-secondary border">{{ row.deleted_by or 'Admin' }}</span></td>
+            <td class="text-muted small">{{ row.deletion_reason or '-' }}</td>
+            <td class="text-end">{{ restore_form(url_for('restore_record', table='sales', record_id=row.id), 'Restore') }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8"><div class="empty-state"><i class="bi bi-cart3"></i>No deleted sales.</div></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="panel-title">
+      <h5><i class="bi bi-wallet2 me-1 text-success"></i> Deleted Payments ({{ payments|length }})</h5>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover">
+        <thead>
+          <tr>
+            <th>Payment ID</th>
+            <th>Sales ID</th>
+            <th>Customer</th>
+            <th>Amount</th>
+            <th>Deleted by</th>
+            <th>Reason</th>
+            <th class="text-end">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in payments %}
+          <tr>
+            <td><code>{{ row.payment_id }}</code></td>
+            <td>{{ row.sales_id }}</td>
+            <td><strong>{{ row.customer_name }}</strong></td>
+            <td>{{ row.amount|money }}</td>
+            <td><span class="badge bg-secondary bg-opacity-10 text-secondary border">{{ row.deleted_by or 'Admin' }}</span></td>
+            <td class="text-muted small">{{ row.deletion_reason or '-' }}</td>
+            <td class="text-end">{{ restore_form(url_for('restore_record', table='payments', record_id=row.id), 'Restore') }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7"><div class="empty-state"><i class="bi bi-wallet2"></i>No deleted payments.</div></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="panel-title">
+      <h5><i class="bi bi-people me-1 text-info"></i> Deleted Customers ({{ customers|length }})</h5>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover">
+        <thead>
+          <tr>
+            <th>Customer Name</th>
+            <th>Deleted by</th>
+            <th>Date</th>
+            <th>Reason</th>
+            <th class="text-end">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in customers %}
+          <tr>
+            <td><strong>{{ row.name }}</strong></td>
+            <td><span class="badge bg-secondary bg-opacity-10 text-secondary border">{{ row.deleted_by or 'Admin' }}</span></td>
+            <td>{{ row.deleted_at|pretty_date }}</td>
+            <td class="text-muted small">{{ row.deletion_reason or '-' }}</td>
+            <td class="text-end">
+              {{ restore_form(url_for('restore_customer', customer_id=row.id), 'Restore Everything') }}
+              {{ purge_form(url_for('permanently_delete_customer', customer_id=row.id)) }}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5"><div class="empty-state"><i class="bi bi-people"></i>No deleted customers.</div></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
 {% endblock %}

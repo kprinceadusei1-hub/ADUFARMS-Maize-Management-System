@@ -30,6 +30,8 @@ EXPORT_DIR = BASE_DIR / "exports" / "invoices"
 EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 PROFILE_DIR = BASE_DIR / "static" / "images" / "users"
 PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+DASHBOARD_IMAGE_DIR = BASE_DIR / "static" / "images" / "dashboard" / "custom"
+DASHBOARD_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 BACKUP_DIR = BASE_DIR / "backups"
 BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -45,6 +47,13 @@ app.config.update(
 app.config["DATABASE"] = str(DB_PATH)
 
 ALLOWED_PROFILE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+ALLOWED_PROFILE_MIMES = {"image/jpeg", "image/png", "image/webp"}
+ALLOWED_DASHBOARD_SLOTS = {"hero", "inventory", "delivery"}
+DASHBOARD_IMAGE_DEFAULTS = {
+    "hero": "images/branding/maize-harvest.webp",
+    "inventory": "images/dashboard/warehouse.webp",
+    "delivery": "images/modules/sales.webp",
+}
 
 
 def db():
@@ -182,6 +191,13 @@ def init_db():
         created_by TEXT NOT NULL,
         notes TEXT,
         created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS dashboard_images (
+        slot TEXT PRIMARY KEY,
+        filename TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        updated_by TEXT NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_sales_customer ON sales(customer_id);
@@ -346,7 +362,8 @@ app.jinja_env.globals.update(csrf_input=csrf_input, csrf_token=csrf_token)
 def protect_post_requests():
     # Server-side RBAC: staff must not bypass admin URLs.
     admin_only_endpoints = {"delete_record_route", "restore_record", "users", "edit_user",
-                            "toggle_user", "delete_user", "audit_logs", "admin_backup", "admin_restore"}
+                            "toggle_user", "delete_user", "audit_logs", "admin_backup", "admin_restore",
+                            "admin_gallery"}
     if request.endpoint in admin_only_endpoints and str(session.get("role", "")).upper() != "ADMIN":
         # Allow unauthenticated to fall through to login_required (redirect) rather than 403
         if "user_id" in session:
@@ -358,6 +375,11 @@ def protect_post_requests():
 
 
 def valid_date(value, field_name):
+    if value is None:
+        raise ValueError(f"Enter a valid {field_name}.")
+    value = str(value).strip()
+    if not value:
+        raise ValueError(f"Enter a valid {field_name}.")
     try:
         datetime.strptime(value, "%Y-%m-%d")
         return value
@@ -405,8 +427,23 @@ def admin_required(f):
     return wrapper
 
 
+COMPANY = {
+    "legal_name": "ADUFARMS",
+    "service_line": "Maize Supply & Delivery Services",
+    "tagline": "Growing Better. Distributing Smarter.",
+    "document_note": "Professional maize supply and delivery invoice",
+    "momo_label": "Mobile Money",
+    "momo_number": "054 734 6840",
+    "momo_name": "Agnes Adomah",
+    "bank_name": "Republic Bank",
+    "bank_account": "0070910682301",
+    "bank_account_name": "Kyeremeh Bismark",
+    "bank_branch": "Legon Branch",
+}
+
+
 def money(v):
-    return f"GH\u20b5{float(v or 0):,.2f}"
+    return f"GHS {float(v or 0):,.2f}"
 
 
 def get_float(name, default=0):
@@ -443,10 +480,11 @@ def next_daily_id(prefix, table, column, conn=None, id_date=None):
     return f"{prefix}-{today}-{n:04d}"
 
 
-def invoice_number_for(sale_reference: str) -> str:
-    if not sale_reference:
+def invoice_number_for(sale_reference: str | None) -> str:
+    ref = (sale_reference or "").strip()
+    if not ref:
         return ""
-    ref = sale_reference.strip().upper()
+    ref = ref.upper()
     if ref.startswith("ADU-INV-"):
         return ref
     if ref.startswith("INV-"):
@@ -499,7 +537,13 @@ def ensure_invoice_record(info):
 
 
 def can_see_deleted():
-    return str(session.get("role", "")).upper() == "ADMIN"
+    try:
+        from flask import has_request_context
+        if not has_request_context():
+            return False
+        return str(session.get("role", "")).upper() == "ADMIN"
+    except Exception:
+        return False
 
 
 def visible_sql(alias):
@@ -611,6 +655,27 @@ def delete_record(table, record_id, reference):
         conn.close()
 
 
+def cogs_summary(conn=None):
+    own_conn = conn is None
+    conn = conn or db()
+    try:
+        purchased = conn.execute("SELECT COALESCE(SUM(quantity_received_kg),0) v FROM purchases WHERE deleted=0").fetchone()["v"]
+        sold = conn.execute("SELECT COALESCE(SUM(quantity_kg),0) v FROM sales WHERE deleted=0").fetchone()["v"]
+        cost_rows = conn.execute("SELECT quantity_received_kg, total_cost FROM purchases WHERE deleted=0 ORDER BY id").fetchall()
+        total_received = sum(float(row["quantity_received_kg"]) for row in cost_rows)
+        total_cost = sum(float(row["total_cost"]) for row in cost_rows)
+        unit_cost = (total_cost / total_received) if total_received > 0 else 0.0
+        sold_qty = float(sold)
+        cogs = sold_qty * unit_cost
+        inventory_qty = max(float(purchased) - sold_qty, 0.0)
+        inventory_value = inventory_qty * unit_cost
+        return {"purchased_kg": float(purchased), "sold_kg": float(sold), "available_kg": float(purchased) - float(sold),
+                "unit_cost": unit_cost, "cogs": cogs, "inventory_value": inventory_value}
+    finally:
+        if own_conn:
+            conn.close()
+
+
 def stock_summary():
     conn = db()
     purchased = conn.execute("SELECT COALESCE(SUM(quantity_received_kg),0) v FROM purchases WHERE deleted=0").fetchone()["v"]
@@ -652,7 +717,7 @@ def payment_info(payment_ref):
     info = dict(row)
     info["balance"] = max(float(info["total_sale"]) - float(info["total_paid"] or 0), 0)
     info["status"] = invoice_status_for(info["total_sale"], info["total_paid"])
-    info["invoice_number"] = info.get("invoice_number") or invoice_number_for(info["sales_id"])
+    info["invoice_number"] = info.get("invoice_number") or invoice_number_for(str(info.get("sales_id") or ""))
     return info
 
 
@@ -669,24 +734,27 @@ def sale_info(transaction_id):
         FROM sales s JOIN customers c ON c.id=s.customer_id
         WHERE ({visible_sql('s')}) AND (s.transaction_id=? OR s.sales_id=?
             OR EXISTS (SELECT 1 FROM invoices i WHERE i.transaction_id=s.transaction_id AND i.invoice_number=?)
-            OR EXISTS (SELECT 1 FROM payments p WHERE p.transaction_id=s.transaction_id AND p.payment_id=? OR p.sales_id=?))
+            OR EXISTS (SELECT 1 FROM payments p WHERE p.transaction_id=s.transaction_id AND (p.payment_id=? OR p.sales_id=?)))
     """, (ref, ref, ref, ref, ref)).fetchone()
     conn.close()
     if not row:
         return None
     d = dict(row)
-    d["sales_id"] = d.get("sales_id") or d.get("transaction_id")
+    d["sales_id"] = d.get("sales_id") or d.get("transaction_id") or ""
     d["balance"] = max(float(d["total_sale"]) - float(d["total_paid"]), 0)
     d["status"] = invoice_status_for(d["total_sale"], d["total_paid"])
-    d["invoice_number"] = d.get("invoice_number") or invoice_number_for(d["sales_id"])
+    d["invoice_number"] = d.get("invoice_number") or invoice_number_for(str(d.get("sales_id") or ""))
     return d
 
 
 def log_action(action, reference="", details=""):
     conn = db()
+    username = session.get("username") or "system"
+    reference = "" if reference is None else str(reference)
+    details = "" if details is None else str(details)
     conn.execute(
         "INSERT INTO audit_log(username,action,reference,details,created_at) VALUES(?,?,?,?,?)",
-        (actor_label() if session.get("username") else session.get("username"), action, reference, details, now())
+        (actor_label() if session.get("username") else username, action, reference, details, now())
     )
     conn.commit()
     conn.close()
@@ -699,13 +767,22 @@ def money_filter(v):
 
 @app.template_filter("pretty_date")
 def pretty_date(v):
-    try:
-        return datetime.strptime(v, "%Y-%m-%d").strftime("%-d %B %Y")
-    except Exception:
+    if v is None or str(v).strip() == "":
+        return "-"
+    text = str(v).strip()
+    parsed = None
+    for fmt, slice_to in (("%Y-%m-%d %H:%M:%S", 19), ("%Y-%m-%d", 10)):
         try:
-            return datetime.strptime(v, "%Y-%m-%d %H:%M:%S").strftime("%-d %B %Y %I:%M %p")
-        except Exception:
-            return v
+            parsed = datetime.strptime(text[:slice_to], fmt)
+            break
+        except (ValueError, TypeError):
+            continue
+    if parsed is None:
+        return text
+    stamp = f"{parsed.day} {parsed.strftime('%B %Y')}"
+    if len(text) > 10 and " " in text:
+        stamp += parsed.strftime(" %I:%M %p").replace(" 0", " ")
+    return stamp
 
 
 @app.route("/")
@@ -741,7 +818,7 @@ def login():
 @app.route("/logout")
 def logout():
     if session.get("username"):
-        log_action("LOGOUT", session.get("username"), f"user_id={session.get('user_id')}")
+        log_action("LOGOUT", str(session.get("username") or ""), f"user_id={session.get('user_id') or ''}")
     session.clear()
     return redirect(url_for("login"))
 
@@ -795,17 +872,70 @@ def dashboard():
     today_payments = conn.execute("SELECT COALESCE(SUM(amount),0) v FROM payments WHERE deleted=0 AND payment_date=?", (today,)).fetchone()["v"]
     month_sales = conn.execute("SELECT COALESCE(SUM(total_sale),0) v FROM sales WHERE deleted=0 AND sale_date>=?", (month_start,)).fetchone()["v"]
     month_payments = conn.execute("SELECT COALESCE(SUM(amount),0) v FROM payments WHERE deleted=0 AND payment_date>=?", (month_start,)).fetchone()["v"]
+    pending_invoices = conn.execute("""SELECT COUNT(*) v FROM sales s WHERE s.deleted=0 AND
+        COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) < s.total_sale""").fetchone()["v"]
+    saved_dashboard_images = conn.execute("SELECT slot,filename FROM dashboard_images").fetchall()
     conn.close()
     stats = dict(purchased=purchased,sold=sold,stock=stock,sales=float(sales),payments=float(payments),
                  outstanding=outstanding,purchase_cost=float(purchase_cost),transport=float(transport),
                  other=float(other),expenses=expenses,profit=profit,customers=customers,transactions=transactions,
-                 paid=paid,part=part,unpaid=unpaid,suppliers=supplier_count,
+                 paid=paid,part=part,unpaid=unpaid,suppliers=supplier_count,pending_invoices=pending_invoices,
                  today_sales=float(today_sales),today_payments=float(today_payments),
                  month_sales=float(month_sales),month_payments=float(month_payments))
+    dashboard_images = dict(DASHBOARD_IMAGE_DEFAULTS)
+    dashboard_images.update({row["slot"]: row["filename"] for row in saved_dashboard_images if row["slot"] in ALLOWED_DASHBOARD_SLOTS})
     return render_template("dashboard.html", stats=stats, recent=recent,
                            recent_purchases=recent_purchases, recent_payments=recent_payments,
                            recent_invoices=recent_invoices, outstanding_customers=outstanding_customers,
-                           monthly_sales=monthly_sales, monthly_purchases=monthly_purchases)
+                           monthly_sales=monthly_sales, monthly_purchases=monthly_purchases,
+                           dashboard_images=dashboard_images)
+
+
+@app.route("/dashboard/images", methods=["POST"])
+@login_required
+@admin_required
+def update_dashboard_image():
+    slot = request.form.get("slot", "").strip().lower()
+    action = request.form.get("action", "upload")
+    if slot not in ALLOWED_DASHBOARD_SLOTS:
+        abort(400, description="Choose a valid dashboard image area.")
+    conn = db()
+    existing = conn.execute("SELECT filename FROM dashboard_images WHERE slot=?", (slot,)).fetchone()
+    old_filename = existing["filename"] if existing else None
+    if action == "reset":
+        conn.execute("DELETE FROM dashboard_images WHERE slot=?", (slot,))
+        if old_filename and old_filename.startswith("images/dashboard/custom/"):
+            old_path = BASE_DIR / "static" / old_filename
+            if old_path.exists(): old_path.unlink()
+        conn.commit()
+        conn.close()
+        log_action("DASHBOARD IMAGE RESET", slot, f"user={session.get('username')}")
+        flash(f"{slot.title()} image reset to the ADUFARMS default.", "success")
+        return redirect(url_for("dashboard") + "#dashboard-imagery")
+    image = request.files.get("image")
+    if not image or not image.filename:
+        conn.close()
+        flash("Select a JPG, PNG, or WEBP image first.", "danger")
+        return redirect(url_for("dashboard") + "#dashboard-imagery")
+    extension = Path(image.filename).suffix.lower()
+    if extension not in ALLOWED_PROFILE_EXTS or image.mimetype not in ALLOWED_PROFILE_MIMES:
+        conn.close()
+        flash("Dashboard images must be JPG, PNG, or WEBP.", "danger")
+        return redirect(url_for("dashboard") + "#dashboard-imagery")
+    filename = secure_filename(f"dashboard-{slot}-{secrets.token_hex(8)}{extension}")
+    relative_filename = f"images/dashboard/custom/{filename}"
+    image.save(DASHBOARD_IMAGE_DIR / filename)
+    conn.execute("""INSERT INTO dashboard_images(slot,filename,updated_at,updated_by) VALUES(?,?,?,?)
+                    ON CONFLICT(slot) DO UPDATE SET filename=excluded.filename,updated_at=excluded.updated_at,updated_by=excluded.updated_by""",
+                 (slot, relative_filename, now(), session.get("username", "admin")))
+    conn.commit()
+    conn.close()
+    if old_filename and old_filename.startswith("images/dashboard/custom/") and old_filename != relative_filename:
+        old_path = BASE_DIR / "static" / old_filename
+        if old_path.exists(): old_path.unlink()
+    log_action("DASHBOARD IMAGE UPDATED", slot, f"user={session.get('username')}")
+    flash(f"{slot.title()} image updated.", "success")
+    return redirect(url_for("dashboard") + "#dashboard-imagery")
 
 
 @app.route("/purchases", methods=["GET","POST"])
@@ -829,6 +959,7 @@ def purchases():
             pid = next_daily_id("ADU-PUR", "purchases", "purchase_id")
             ts = now()
             by = session["username"]
+            purchase_date = valid_date(purchase_date, "purchase date")
             conn = db()
             try:
                 conn.execute("""INSERT INTO purchases
@@ -885,10 +1016,11 @@ def sales():
             conn = db()
             try:
                 conn.execute("BEGIN IMMEDIATE")
-                tid = next_daily_id("ADU", "sales", "transaction_id", conn, datetime.strptime(sale_date, "%Y-%m-%d").date())
-                sales_id = next_daily_id("ADU-SAL", "sales", "sales_id", conn, datetime.strptime(sale_date, "%Y-%m-%d").date())
-                invoice_id = next_daily_id("ADU-INV", "invoices", "invoice_number", conn,
-                                           datetime.strptime(sale_date, "%Y-%m-%d").date())
+                sale_date = valid_date(sale_date, "sale date")
+                sale_day = datetime.strptime(sale_date, "%Y-%m-%d").date()
+                tid = next_daily_id("ADU", "sales", "transaction_id", conn, sale_day)
+                sales_id = next_daily_id("ADU-SAL", "sales", "sales_id", conn, sale_day)
+                invoice_id = next_daily_id("ADU-INV", "invoices", "invoice_number", conn, sale_day)
                 stock_svc.assert_stock_available(conn, qty)
                 customer = conn.execute("SELECT id FROM customers WHERE lower(name)=lower(?) AND phone=?", (name,phone)).fetchone()
                 if customer:
@@ -970,6 +1102,7 @@ def payments():
             conn = db()
             try:
                 payment_reference = request.form.get("payment_reference", "").strip()
+                pay_date = valid_date(pay_date, "payment date")
                 if payment_reference and conn.execute(
                     "SELECT 1 FROM payments WHERE transaction_id=? AND payment_reference=? AND deleted=0",
                     (tid, payment_reference)
@@ -1032,6 +1165,7 @@ def edit_purchase(purchase_id):
                 raise ValueError("Quantity received must be between 0 and quantity purchased.")
             ts = now()
             by = session["username"]
+            purchase_date = valid_date(purchase_date, "purchase date")
             conn = db()
             try:
                 current = conn.execute("SELECT * FROM purchases WHERE id=?", (purchase_id,)).fetchone()
@@ -1089,6 +1223,7 @@ def edit_sale(sale_id):
                 raise ValueError("Customer name is required.")
             ts = now()
             by = session["username"]
+            sale_date = valid_date(sale_date, "sale date")
             conn = db()
             try:
                 current = conn.execute("SELECT * FROM sales WHERE id=?", (sale_id,)).fetchone()
@@ -1164,6 +1299,7 @@ def edit_payment(payment_id):
 @login_required
 def customers():
     if request.method == "POST":
+        conn = None
         try:
             name = request.form.get("name", "").strip()
             opening_balance = nonnegative_float("opening_balance")
@@ -1183,7 +1319,7 @@ def customers():
             flash("Customer created. Enter the sale details to generate the Sales ID and invoice number.", "success")
             return redirect(url_for("sales", customer_id=customer_id))
         except (ValueError, sqlite3.Error) as error:
-            if "conn" in locals():
+            if conn is not None:
                 conn.rollback()
                 conn.close()
             flash(str(error) if isinstance(error, ValueError) else "The customer could not be saved.", "danger")
@@ -1307,6 +1443,7 @@ def delete_customer(customer_id):
 def deleted_records():
     conn = db()
     customers = conn.execute("SELECT * FROM customers WHERE active=0 ORDER BY deleted_at DESC").fetchall()
+    purchases = conn.execute("SELECT * FROM purchases WHERE deleted=1 ORDER BY deleted_at DESC LIMIT 200").fetchall()
     sales = conn.execute("""SELECT s.*,c.name customer_name,COALESCE(s.invoice_number,i.invoice_number) invoice_number
         FROM sales s JOIN customers c ON c.id=s.customer_id LEFT JOIN invoices i ON i.transaction_id=s.transaction_id
         WHERE s.deleted=1 ORDER BY s.deleted_at DESC LIMIT 200""").fetchall()
@@ -1317,8 +1454,8 @@ def deleted_records():
         FROM invoices i JOIN sales s ON s.transaction_id=i.transaction_id JOIN customers c ON c.id=s.customer_id
         WHERE i.deleted=1 ORDER BY i.deleted_at DESC LIMIT 200""").fetchall()
     conn.close()
-    return render_template("deleted_records.html", customers=customers, sales=sales,
-                           payments=payments, invoices=invoices)
+    return render_template("deleted_records.html", customers=customers, purchases=purchases,
+                           sales=sales, payments=payments, invoices=invoices)
 
 
 @app.route("/admin/customers/<int:customer_id>/restore", methods=["POST"])
@@ -1570,8 +1707,9 @@ def invoice(transaction_id=None):
             conditions.append("c.phone LIKE ?")
             params.append(f"%{phone_query}%")
         if invoice_no:
-            conditions.append("i.invoice_number LIKE ?")
-            params.append(f"%{invoice_no.upper()}%")
+            conditions.append("(UPPER(COALESCE(i.invoice_number, '')) LIKE ? OR UPPER(COALESCE(s.invoice_number, '')) LIKE ? OR UPPER(COALESCE(s.sales_id, '')) LIKE ?)")
+            needle = f"%{invoice_no.upper()}%"
+            params.extend([needle, needle, needle])
         if invoice_date:
             conditions.append("s.sale_date=?")
             params.append(invoice_date)
@@ -1584,26 +1722,40 @@ def invoice(transaction_id=None):
             clause = " OR ".join(["(CASE WHEN (s.total_sale - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0)) <= 0.005 THEN 'PAID' WHEN COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) > s.total_sale + 0.005 THEN 'OVERPAID' WHEN COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) > 0 THEN 'PART PAYMENT' ELSE 'UNPAID' END) = ?" for _ in statuses])
             conditions.append(f"({clause})")
             params.extend(statuses)
-        invoice_matches = conn.execute(f"""SELECT s.transaction_id,s.sales_id,i.invoice_number,s.sale_date,c.name customer_name,c.phone customer_phone,s.total_sale,
-            COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) total_paid
+        invoice_matches = conn.execute(f"""SELECT s.transaction_id,s.sales_id,COALESCE(i.invoice_number,s.invoice_number) invoice_number,s.sale_date,c.name customer_name,c.phone customer_phone,s.total_sale,
+            COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) total_paid,
+            CASE WHEN COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) > s.total_sale + 0.005 THEN 'OVERPAID'
+                 WHEN s.total_sale - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) <= 0.005 THEN 'PAID'
+                 WHEN COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) > 0 THEN 'PART PAYMENT'
+                 ELSE 'UNPAID' END status
             FROM sales s JOIN customers c ON c.id=s.customer_id LEFT JOIN invoices i ON i.transaction_id=s.transaction_id
             WHERE {' AND '.join(conditions)} ORDER BY s.sale_date DESC,s.id DESC LIMIT 50""", params).fetchall()
         conn.close()
+        if not info and len(invoice_matches) == 1:
+            match = invoice_matches[0]
+            info = sale_info(match["sales_id"] or match["transaction_id"])
+            if info:
+                info["invoice_number"] = ensure_invoice_record(info)
+                conn = db()
+                payments_list = conn.execute("SELECT * FROM payments WHERE transaction_id=? AND deleted=0 ORDER BY payment_date,id", (info["transaction_id"],)).fetchall()
+                conn.close()
     conn = db()
-    invoice_history = conn.execute("""SELECT s.transaction_id,s.sales_id,s.sale_date,c.name customer_name,c.phone customer_phone,s.total_sale,
+    invoice_history = conn.execute("""SELECT s.transaction_id,s.sales_id,COALESCE(i.invoice_number,s.invoice_number) invoice_number,s.sale_date,c.name customer_name,c.phone customer_phone,s.total_sale,
         COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) total_paid,
         CASE WHEN COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) > s.total_sale + 0.005 THEN 'OVERPAID'
              WHEN s.total_sale - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) <= 0.005 THEN 'PAID'
              WHEN COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) > 0 THEN 'PART PAYMENT'
              ELSE 'UNPAID' END status
-        FROM sales s JOIN customers c ON c.id=s.customer_id
+        FROM sales s JOIN customers c ON c.id=s.customer_id LEFT JOIN invoices i ON i.transaction_id=s.transaction_id
         WHERE s.deleted=0 ORDER BY s.sale_date DESC,s.id DESC LIMIT 20""").fetchall()
     conn.close()
+    print_view = request.path.rstrip("/").endswith("/print") or request.args.get("print") in {"1", "true", "yes"}
     return render_template("invoice.html", info=info, payments=payments_list,
                            invoice_matches=invoice_matches, invoice_history=invoice_history,
                            customer_query=customer_query, phone_query=phone_query,
                            invoice_no=invoice_no, invoice_date=invoice_date,
-                           status_query=status_query, print_view=request.path.endswith('/print'))
+                           status_query=status_query, print_view=print_view, company=COMPANY,
+                           searching=bool(customer_query or phone_query or invoice_no or invoice_date or status_query))
 
 
 @app.route("/invoice/<transaction_id>/pdf")
@@ -1614,7 +1766,7 @@ def invoice_pdf(transaction_id):
         abort(404)
     info["invoice_number"] = ensure_invoice_record(info)
     conn = db()
-    pdf_payments = conn.execute("""SELECT payment_id,payment_date,payment_method,amount
+    pdf_payments = conn.execute("""SELECT payment_id,payment_date,payment_method,payment_reference,amount
         FROM payments WHERE transaction_id=? AND deleted=0 ORDER BY payment_date,id""",
                                (info["transaction_id"],)).fetchall()
     conn.close()
@@ -1634,51 +1786,54 @@ def invoice_pdf(transaction_id):
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="SmallRight", parent=styles["Normal"], alignment=TA_RIGHT, fontSize=9))
     styles.add(ParagraphStyle(name="Center", parent=styles["Normal"], alignment=TA_CENTER))
+    styles.add(ParagraphStyle(name="Muted", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#52665b")))
     story = []
     logo_path = BASE_DIR / "static" / "images" / "branding" / "adufarms-logo.jpg"
-    if logo_path.exists():
-        logo = Image(str(logo_path), width=42*mm, height=30*mm, kind="proportional")
-        story.append(logo)
-    story += [Paragraph("<b>ADUFARMS</b>", styles["Title"]),
-              Paragraph("MAIZE SUPPLY &amp; DELIVERY SERVICES", styles["Heading3"]), Spacer(1,8)]
-    meta = [
-        ["Invoice No.", info["invoice_number"], "Date", pretty_date(info["sale_date"])],
-        ["Sales ID", info["sales_id"], "Phone", info["customer_phone"] or "-"],
-        ["Customer", info["customer_name"], "Status", info["status"]],
-        ["Address", info["customer_address"] or info["customer_location"] or "-", "Due", pretty_date(info["sale_date"])],
-    ]
-    t = Table(meta, colWidths=[28*mm,70*mm,25*mm,55*mm])
-    t.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.4,colors.grey),("BACKGROUND",(0,0),(0,-1),colors.lightgrey)]))
+    brand = [Paragraph(f"<b>{COMPANY['legal_name']}</b>", styles["Title"]),
+             Paragraph(COMPANY["service_line"].upper(), styles["Heading3"]),
+             Paragraph(COMPANY["document_note"], styles["Muted"])]
+    header = Table([[Image(str(logo_path), width=30*mm, height=22*mm, kind="proportional") if logo_path.exists() else "", brand,
+                    [Paragraph("<b>INVOICE</b>", styles["SmallRight"]), Paragraph(info["invoice_number"], styles["SmallRight"]), Paragraph(pretty_date(info["sale_date"]), styles["SmallRight"]), Paragraph(f"<b>{info['status']}</b>", styles["SmallRight"])] ]], colWidths=[32*mm,82*mm,64*mm])
+    header.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"TOP"),("LINEBELOW",(0,0),(-1,-1),1,colors.HexColor("#c99b2f")),("LEFTPADDING",(0,0),(-1,-1),0),("RIGHTPADDING",(0,0),(-1,-1),4)]))
+    story.append(header)
+    story.append(Spacer(1,10))
+    meta = [["BILLED TO", info["customer_name"], "TRANSACTION DETAILS", ""],
+            ["Phone", info["customer_phone"] or "-", "Sales ID", info["sales_id"]],
+            ["Address", info["customer_address"] or info["customer_location"] or "-", "Invoice No.", info["invoice_number"]],
+            ["", "", "Issued by", info.get("staff_user") or "-"],
+            ["", "", "Invoice / due date", pretty_date(info["sale_date"])]]
+    t = Table(meta, colWidths=[28*mm,70*mm,32*mm,48*mm])
+    t.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.4,colors.HexColor("#dce6df")),("BACKGROUND",(0,0),(-1,0),colors.HexColor("#e9f2eb")),("TEXTCOLOR",(0,0),(-1,0),colors.HexColor("#173c2b")),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold")]))
     story += [t, Spacer(1,15)]
     data = [["Description","Quantity (KG)","Unit Price (GHS)","Total (GHS)"],
-            ["Maize Supply",f'{info["quantity_kg"]:,.2f}',money(info["selling_price_kg"]),money(info["total_sale"])]]
+            ["Maize supply — fresh maize distribution",f'{info["quantity_kg"]:,.2f}',money(info["selling_price_kg"]),money(info["total_sale"])]]
     t2=Table(data,colWidths=[70*mm,35*mm,35*mm,40*mm])
-    t2.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.5,colors.grey),("BACKGROUND",(0,0),(-1,0),colors.lightgrey),
+    t2.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.5,colors.HexColor("#dce6df")),("BACKGROUND",(0,0),(-1,0),colors.HexColor("#173c2b")),("TEXTCOLOR",(0,0),(-1,0),colors.white),
                             ("ALIGN",(1,1),(-1,-1),"RIGHT")]))
-    payment_data = [["Payment ID", "Date", "Method", "Amount (GHS)"]]
-    payment_data.extend([[payment["payment_id"], pretty_date(payment["payment_date"]),
-                          payment["payment_method"], money(payment["amount"])] for payment in pdf_payments])
+    payment_data = [["Payment ID", "Date", "Method", "Reference", "Amount (GHS)"]]
+    payment_data.extend([[payment["payment_id"] or "-", pretty_date(payment["payment_date"]), payment["payment_method"] or "-", payment["payment_reference"] or "-", money(payment["amount"])] for payment in pdf_payments])
     if len(payment_data) == 1:
-        payment_data.append(["No payments recorded", "-", "-", money(0)])
-    payment_table = Table(payment_data, colWidths=[45*mm,35*mm,50*mm,40*mm])
+        payment_data.append(["No payment recorded", "-", "-", "-", money(0)])
+    payment_table = Table(payment_data, colWidths=[35*mm,32*mm,38*mm,38*mm,27*mm])
     payment_table.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.4,colors.grey),
-                                       ("BACKGROUND",(0,0),(-1,0),colors.lightgrey),
-                                       ("ALIGN",(3,1),(3,-1),"RIGHT")]))
+                                       ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#173c2b")),("TEXTCOLOR",(0,0),(-1,0),colors.white),
+                                       ("ALIGN",(4,1),(4,-1),"RIGHT")]))
     story += [t2, Spacer(1,12), Paragraph("<b>PAYMENT HISTORY</b>", styles["Heading3"]), payment_table, Spacer(1,15)]
-    totals=[["Subtotal (GHS)",money(info["total_sale"])],
-            ["Delivery Fee (GHS)","N/A"],
-            ["Grand Total (GHS)",money(info["total_sale"])],
-            ["Amount Paid",money(info["total_paid"])],
-            ["Outstanding Balance",money(info["balance"])],
-            ["Payment Status",info["status"]]]
+    totals=[["Subtotal",money(info["total_sale"])],
+            ["Delivery fee","GHS 0.00"],
+            ["Grand total",money(info["total_sale"])],
+            ["Amount paid",money(info["total_paid"])],
+            ["Outstanding balance",money(info["balance"])],
+            ["Payment status",info["status"]]]
     t3=Table(totals,colWidths=[120*mm,60*mm],hAlign="RIGHT")
     t3.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.4,colors.grey),("ALIGN",(1,0),(1,-1),"RIGHT"),
-                            ("BACKGROUND",(0,0),(0,-1),colors.lightgrey)]))
-    payment_lines = [Paragraph("<b>PAYMENT METHOD</b>: Mobile Money / Bank Transfer", styles["Normal"]),
-                     Paragraph("<b>MOBILE MONEY</b>: 054 734 6840 · Agnes Adomah", styles["Normal"]),
-                     Paragraph("<b>BANK</b>: 0070910682301 · Kyeremeh Bismark · Republic Bank (Legon Branch)", styles["Normal"]),
-                     Spacer(1, 12), Paragraph("Authorized Signature: ____________________________", styles["Normal"])]
-    story += [t3, Spacer(1,12)] + payment_lines + [Spacer(1,18), Paragraph("Thank you for doing business with ADUFARMS.", styles["Center"])]
+                            ("BACKGROUND",(0,2),(1,2),colors.HexColor("#e9f2eb")),
+                            ("BACKGROUND",(0,0),(0,-1),colors.HexColor("#f3f8f4"))]))
+    payment_lines = [Paragraph(f"<b>MOBILE MONEY</b>: {COMPANY['momo_number']} · {COMPANY['momo_name']}", styles["Normal"]),
+                     Paragraph(f"<b>BANK</b>: {COMPANY['bank_account']} · {COMPANY['bank_account_name']} · {COMPANY['bank_name']} ({COMPANY['bank_branch']})", styles["Normal"]),
+                     Spacer(1, 12), Paragraph("Authorized signature: ____________________________", styles["Normal"]),
+                     Paragraph("Payment is due on the invoice date unless otherwise agreed in writing.", styles["Muted"])]
+    story += [t3, Spacer(1,12)] + payment_lines + [Spacer(1,18), Paragraph(f"Thank you for doing business with {COMPANY['legal_name']}. {COMPANY['tagline']}", styles["Center"])]
     doc.build(story); buf.seek(0)
     return send_file(buf, as_attachment=True, download_name=f"{info['invoice_number']}.pdf", mimetype="application/pdf")
 
@@ -1840,17 +1995,37 @@ def profile():
             image = request.files.get("profile_image")
             if image and image.filename:
                 extension = Path(image.filename).suffix.lower()
-                if extension not in ALLOWED_PROFILE_EXTS:
+                if extension not in ALLOWED_PROFILE_EXTS or image.mimetype not in ALLOWED_PROFILE_MIMES:
                     flash("Profile image must be JPG, PNG, or WEBP.", "danger")
                     conn.close()
                     return render_template("profile.html", user=user)
-                filename = secure_filename(f"user-{user['id']}-{image.filename}")
+                if request.content_length and request.content_length > app.config["MAX_CONTENT_LENGTH"]:
+                    flash("Profile image must be 2 MB or smaller.", "danger")
+                    conn.close()
+                    return render_template("profile.html", user=user)
+                old_filename = user["profile_image"]
+                filename = secure_filename(f"user-{user['id']}-{secrets.token_hex(8)}{extension}")
                 image.save(PROFILE_DIR / filename)
                 conn.execute("UPDATE users SET profile_image=? WHERE id=?", (filename, user["id"]))
                 conn.commit()
                 session["profile_image"] = filename
+                if old_filename and old_filename != filename:
+                    old_path = PROFILE_DIR / old_filename
+                    if old_path.exists():
+                        old_path.unlink()
                 log_action("PROFILE UPDATED", user["username"], f"user_id={user['id']}; profile_image updated")
                 flash("Profile image updated.", "success")
+        elif action == "remove_image":
+            old_filename = user["profile_image"]
+            conn.execute("UPDATE users SET profile_image=NULL WHERE id=?", (user["id"],))
+            conn.commit()
+            session.pop("profile_image", None)
+            if old_filename:
+                old_path = PROFILE_DIR / old_filename
+                if old_path.exists():
+                    old_path.unlink()
+            log_action("PROFILE UPDATED", user["username"], f"user_id={user['id']}; profile_image removed")
+            flash("Profile image removed.", "success")
         user = conn.execute("SELECT * FROM users WHERE id=?", (session["user_id"],)).fetchone()
     conn.close()
     return render_template("profile.html", user=user)
@@ -1953,6 +2128,13 @@ def toggle_user(user_id):
         log_action(state, updated["username"], f"user_id={user_id}; by={actor_label()}")
         log_action("ADMIN ACTION", updated["username"], f"{state} user_id={user_id}")
     return redirect(url_for("users"))
+
+
+@app.route("/admin/gallery")
+@login_required
+@admin_required
+def admin_gallery():
+    return render_template("error.html", code=403, message="Gallery access is restricted to administrators."), 403
 
 
 @app.route("/admin/audit-logs")
