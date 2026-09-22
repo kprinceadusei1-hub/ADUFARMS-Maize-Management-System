@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 {% block title %}User Management – ADUFARMS{% endblock %}
 {% block content %}
-<span id="roles" class="anchor-target" aria-hidden="true"></span>
 <div class="dashboard-heading">
   <div>
     <span class="eyebrow"><i class="bi bi-people-fill"></i> ACCESS CONTROL</span>
@@ -33,14 +32,15 @@
         <label class="form-label">Initial Password <span class="required-mark">*</span></label>
         <div class="input-group">
           <span class="input-group-text"><i class="bi bi-lock"></i></span>
-          <input name="password" type="password" class="form-control" placeholder="Min. 8 characters" minlength="8" required>
+          <input name="password" type="password" class="form-control" placeholder="12+ characters, upper/lowercase, number, symbol" minlength="12" required>
         </div>
       </div>
       <div class="col-md-2">
         <label class="form-label">System Role <span class="required-mark">*</span></label>
         <select name="role" class="form-select">
-          <option value="STAFF">STAFF</option>
-          <option value="ADMIN">ADMIN</option>
+          {% for role_name in role_permissions.keys()|list %}
+            <option value="{{ role_name }}">{{ role_labels.get(role_name, role_name) }}</option>
+          {% endfor %}
         </select>
       </div>
       <div class="col-md-1 d-flex align-items-end">

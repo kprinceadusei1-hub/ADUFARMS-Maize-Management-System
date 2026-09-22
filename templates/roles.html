@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Roles & Permissions – ADUFARMS{% endblock %}
+{% block content %}
+<div class="dashboard-heading">
+  <div>
+    <span class="eyebrow"><i class="bi bi-person-gear"></i> ACCESS CONTROL</span>
+    <h2>Roles &amp; Permissions</h2>
+    <p>Review the operational permission matrix for each user role in the system.</p>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-sm table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Role</th>
+            <th>Permissions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for role_name, permissions in role_permissions.items() %}
+            <tr>
+              <td><span class="badge bg-light text-dark border">{{ role_labels.get(role_name, role_name) }}</span></td>
+              <td>
+                {% for perm in permissions|sort %}
+                  <span class="badge bg-secondary bg-opacity-10 text-secondary border me-1 mb-1">{{ perm }}</span>
+                {% endfor %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

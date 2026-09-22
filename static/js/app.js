@@ -89,6 +89,8 @@ document.addEventListener("DOMContentLoaded", function () {
 		const modal = new bootstrap.Modal(modalElement);
 		const message = document.getElementById("actionConfirmMessage");
 		const confirmButton = document.getElementById("actionConfirmButton");
+		const title = modalElement.querySelector(".modal-title");
+		const reasonLabel = modalElement.querySelector("label[for='reversalReason']");
 		const reversalReason = document.getElementById("reversalReason");
 		let pendingForm = null;
 		document.querySelectorAll("form[onsubmit]").forEach(function (form) {
@@ -101,7 +103,15 @@ document.addEventListener("DOMContentLoaded", function () {
 		document.querySelectorAll("form[data-confirm]").forEach(function (form) {
 			form.addEventListener("submit", function (event) {
 				if (form.dataset.confirmed === "true") { form.dataset.confirmed = "false"; return; }
-				event.preventDefault(); pendingForm = form; message.textContent = form.dataset.confirm; if (reversalReason) { reversalReason.value = ""; reversalReason.classList.remove("is-invalid"); } modal.show();
+				event.preventDefault();
+				pendingForm = form;
+				const isRestore = form.action.includes("/restore");
+				if (title) title.textContent = isRestore ? "Confirm Transaction Restoration" : "Confirm Transaction Reversal";
+				if (message) message.textContent = isRestore ? "Review this transaction before restoring it to active records." : "This will reverse the transaction and retain a complete audit record. It will not permanently delete the record.";
+				if (reasonLabel) reasonLabel.innerHTML = (isRestore ? "Business reason for restoration" : "Business reason for reversal") + ' <span class="required-mark">*</span>';
+				if (confirmButton) { confirmButton.textContent = isRestore ? "Restore Transaction" : "Reverse Transaction"; confirmButton.className = "btn " + (isRestore ? "btn-success" : "btn-warning"); }
+				if (reversalReason) { reversalReason.value = ""; reversalReason.placeholder = isRestore ? "Example: Reversal was made in error" : "Example: Duplicate or incorrect transaction"; reversalReason.classList.remove("is-invalid"); }
+				modal.show();
 			});
 		});
 		if (confirmButton) confirmButton.addEventListener("click", function () {
@@ -126,9 +136,9 @@ document.addEventListener("DOMContentLoaded", function () {
 			const title = document.getElementById("deleteTransactionTitle");
 			const messageText = document.getElementById("deleteTransactionMessage");
 			const submitText = document.getElementById("deleteTransactionSubmit");
-			if (title) title.textContent = "Delete " + type + "?";
-			if (messageText) messageText.textContent = "This action cannot be undone. Are you sure you want to delete this " + type.toLowerCase() + "?";
-			if (submitText) submitText.textContent = "Delete " + type;
+			if (title) title.textContent = "Permanently Delete " + type;
+			if (messageText) messageText.textContent = "This permanently deletes the selected " + type.toLowerCase() + " and cannot be undone. Your reason will be retained in the audit log.";
+			if (submitText) submitText.textContent = "Permanently Delete " + type;
 			const fields = { Id: "deleteId", Type: "deleteType", Party: "deleteParty", Quantity: "deleteQuantity", Amount: "deleteAmount", Date: "deleteDate" };
 			Object.keys(fields).forEach(function (field) {
 				const target = document.getElementById("deleteTransaction" + field);
@@ -160,6 +170,7 @@ document.addEventListener("DOMContentLoaded", function () {
 	}
 	document.querySelectorAll("form").forEach(function (form) {
 		form.addEventListener("submit", function () {
+			if (form.id === "loginForm") return;
 			const button = form.querySelector("button[type='submit'], button:not([type])");
 			if (!button || form.dataset.confirmed === "true") return;
 			button.disabled = true;

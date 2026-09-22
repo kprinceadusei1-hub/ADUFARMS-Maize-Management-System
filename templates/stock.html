@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Stock – ADUFARMS{% endblock %}
 {% block content %}
+<div class="d-flex justify-content-end mb-2"><a class="btn btn-outline-primary btn-sm" href="{{ url_for('stock', format='csv') }}"><i class="bi bi-download me-1"></i>Export movements</a></div>
 <div class="dashboard-heading"><div><span class="eyebrow">INVENTORY</span><h2>Stock management</h2><p>Every stock change is traceable. Purchase = IN · Sale = OUT.</p></div>
 {% if depleted %}<span class="status-badge status-unpaid"><i class="bi bi-exclamation-triangle"></i> STOCK DEPLETED</span>
 {% elif low %}<span class="status-badge status-part"><i class="bi bi-exclamation-circle"></i> LOW STOCK</span>

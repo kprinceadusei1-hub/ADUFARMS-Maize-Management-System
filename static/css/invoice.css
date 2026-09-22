@@ -34,22 +34,6 @@
   overflow: hidden;
 }
 
-.invoice-watermark {
-  position: absolute;
-  inset: 1.5rem 0 auto 0;
-  display: flex;
-  justify-content: center;
-  opacity: 0.08;
-  pointer-events: none;
-}
-
-.invoice-watermark img {
-  width: 260px;
-  height: auto;
-  object-fit: contain;
-  filter: grayscale(1);
-}
-
 .invoice-header {
   position: relative;
   z-index: 1;
@@ -376,7 +360,9 @@
   }
 
   .invoice-paper {
-    max-width: none !important;
+    width: 100% !important;
+    max-width: 186mm !important;
+    box-sizing: border-box !important;
     margin: 0 !important;
     padding: 0 !important;
     border: none !important;
@@ -385,11 +371,22 @@
     background: #fff !important;
   }
 
+  .invoice-paper table,
+  .invoice-paper img {
+    max-width: 100% !important;
+  }
+
+  .invoice-header,
+  .invoice-info-grid,
+  .invoice-summary-row,
+  .payment-details-card,
+  .payment-options,
+  .invoice-document-footer {
+    break-inside: avoid;
+  }
+
   .invoice-accent { margin: 0 0 1.2rem; }
 
-  .invoice-watermark {
-    opacity: 0.12;
-  }
 }
 
 /* Corporate ADUFARMS invoice treatment. */
@@ -458,4 +455,69 @@
 .invoice-document-footer small { color:#8a9890; }
 .invoice-history-panel { margin-top:1.5rem; padding:1.3rem; border:1px solid #dce6df; border-radius:8px; background:#fff; }
 @media (max-width:768px) { .invoice-toolbar,.invoice-header { align-items:flex-start; flex-direction:column; }.invoice-toolbar .invoice-actions { width:100%; }.invoice-search-panel,.invoice-info-grid,.invoice-summary-row,.payment-options,.invoice-document-footer { grid-template-columns:1fr; }.invoice-accent { margin:-1.2rem -1.2rem 1.3rem; }.invoice-paper { padding:1.2rem; }.invoice-meta { align-items:flex-start; }.payment-detail-grid { grid-template-columns:1fr 1fr; }.payment-options > div + div { padding:1rem 0 0; border-left:0; border-top:1px solid #dce6df; } }
+
+/* Final commercial invoice treatment. */
+.invoice-paper { max-width:920px; padding:2rem 2.1rem 1.5rem; color:#263a30; }
+.invoice-paper { position:relative; isolation:isolate; }
+.invoice-paper > :not(.invoice-watermark) { position:relative; z-index:1; }
+.invoice-watermark { position:absolute; top:50%; left:0; right:0; z-index:0; display:flex; justify-content:center; transform:translateY(-50%); opacity:.13; pointer-events:none; }
+.invoice-watermark img { width:min(62%, 460px); height:auto; filter:saturate(1.05); }
+.invoice-accent { height:4px; margin:-2rem -2.1rem 1.55rem; }
+.invoice-header { align-items:center; padding-bottom:1.15rem; }
+.document-brand { gap:.85rem; }
+.document-brand img { width:78px; height:58px; }
+.document-brand h1 { font-size:1.65rem; }
+.document-brand strong { font-size:.66rem; }
+.document-brand small { font-size:.64rem; }
+.invoice-label { font-size:1.25rem; }
+.invoice-meta { gap:.12rem; font-size:.72rem; line-height:1.5; }
+.invoice-meta > strong { font-size:.82rem; }
+.invoice-info-grid { gap:.8rem; margin-top:1.1rem; }
+.invoice-info-block { padding:.85rem 1rem; border-radius:6px; }
+.invoice-info-block h3 { font-size:.95rem; }
+.invoice-info-block p { margin:.35rem 0 0; font-size:.75rem; line-height:1.4; }
+.invoice-info-block dl { gap:.2rem .65rem; font-size:.72rem; }
+.invoice-section-label { margin-bottom:.4rem; font-size:.62rem; }
+.mini-status { display:inline-flex; align-items:center; padding:.14rem .38rem; border-radius:999px; font-size:.57rem; font-weight:800; letter-spacing:.05em; }
+.mini-status-complete { color:#146c43; background:#e1f3e7; }
+.invoice-items { margin-top:1.2rem; overflow:visible; }
+.invoice-items table { table-layout:fixed; }
+.invoice-items th,.invoice-items td { padding:.58rem .62rem; font-size:.75rem; }
+.invoice-items th { font-size:.62rem; }
+.invoice-items th:first-child,.invoice-items td:first-child { width:38%; }
+.invoice-items th:nth-child(2),.invoice-items td:nth-child(2) { width:13%; }
+.invoice-items th:nth-child(3),.invoice-items td:nth-child(3) { width:10%; }
+.invoice-items th:nth-child(4),.invoice-items td:nth-child(4) { width:19%; }
+.invoice-items th:nth-child(5),.invoice-items td:nth-child(5) { width:20%; }
+.invoice-items td { overflow-wrap:anywhere; }
+.invoice-summary-row { grid-template-columns:1fr minmax(270px,370px); gap:1.4rem; margin-top:1.15rem; }
+.delivery-note { padding:.75rem .9rem; border:1px solid #dce6df; border-radius:6px; background:#f7faf7; font-size:.74rem; line-height:1.55; }
+.invoice-totals { border-radius:6px; }
+.invoice-totals > div { padding:.48rem .7rem; font-size:.74rem; }
+.invoice-totals .grand-total { font-size:.88rem; }
+.invoice-totals .grand-total strong { font-size:1rem; }
+.payment-details-card,.payment-options { margin-top:1.1rem; padding:.8rem .9rem; border-radius:6px; }
+.payment-detail-grid { gap:.75rem; }
+.payment-detail-grid strong { font-size:.76rem; }
+.payment-history th,.payment-history td { padding:.46rem .5rem; font-size:.68rem; overflow-wrap:anywhere; }
+.payment-options { gap:.8rem; }
+.payment-options strong { font-size:.75rem; }
+.payment-options p { font-size:.7rem; line-height:1.45; }
+.invoice-document-footer { grid-template-columns:.8fr 1.2fr; gap:1.4rem; margin-top:1.25rem; padding-top:.85rem; font-size:.68rem; }
+.invoice-document-footer strong { font-size:.62rem; }
+.invoice-document-footer small { font-size:.6rem; }
+@media print {
+  html, body, .app-shell, .app-main, .main-content, .invoice-page { height:auto !important; min-height:0 !important; overflow:visible !important; }
+  body.authenticated { overflow:visible !important; }
+  .invoice-page { padding:0 !important; }
+  .invoice-paper { width:100% !important; max-width:186mm !important; padding:0 !important; }
+  .invoice-paper .invoice-accent { margin:0 0 1.1rem; }
+  .invoice-paper .invoice-actions { display:none !important; }
+  .invoice-paper .invoice-info-grid { margin-top:.9rem; }
+  .invoice-paper .invoice-items { margin-top:.95rem; }
+  .invoice-paper .invoice-summary-row { margin-top:.9rem; }
+  .invoice-paper .payment-details-card,.invoice-paper .payment-options { margin-top:.85rem; }
+  .invoice-paper .invoice-document-footer { margin-top:1rem; }
+  .invoice-watermark { opacity:.11; }
+}
 @media print { .invoice-toolbar,.invoice-search-panel,.invoice-history-panel,.invoice-actions,.invoice-empty { display:none!important; } }

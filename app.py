@@ -10,6 +10,8 @@ import io
 import csv
 import secrets
 import hmac
+import smtplib
+from email.message import EmailMessage
 from markupsafe import Markup
 from werkzeug.utils import secure_filename
 
@@ -36,13 +38,19 @@ BACKUP_DIR = BASE_DIR / "backups"
 BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("ADUFARMS_SECRET_KEY") or os.urandom(32)
+environment = os.environ.get("ADUFARMS_ENV", "development").strip().lower()
+configured_secret = os.environ.get("ADUFARMS_SECRET_KEY")
+if environment == "production" and not configured_secret:
+    raise RuntimeError("ADUFARMS_SECRET_KEY must be configured in production.")
+app.secret_key = configured_secret or os.urandom(32)
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=os.environ.get("ADUFARMS_COOKIE_SECURE", "0") == "1",
+    SESSION_COOKIE_NAME="adufarms_session",
     MAX_CONTENT_LENGTH=2 * 1024 * 1024,
     PERMANENT_SESSION_LIFETIME=timedelta(minutes=30),
+    DATABASE_TIMEOUT=float(os.environ.get("ADUFARMS_DATABASE_TIMEOUT", "30")),
 )
 app.config["DATABASE"] = str(DB_PATH)
 
@@ -57,9 +65,15 @@ DASHBOARD_IMAGE_DEFAULTS = {
 
 
 def db():
-    conn = sqlite3.connect(app.config["DATABASE"])
+    conn = sqlite3.connect(
+        app.config["DATABASE"],
+        timeout=app.config["DATABASE_TIMEOUT"],
+    )
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
     return conn
 
 
@@ -76,11 +90,19 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
         full_name TEXT NOT NULL,
+        email TEXT,
+        email_verified INTEGER NOT NULL DEFAULT 0,
+        verification_token TEXT,
+        verification_expires_at TEXT,
+        login_otp_hash TEXT,
+        login_otp_expires_at TEXT,
         password_hash TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'STAFF',
         active INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         last_login TEXT,
+        failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+        locked_until TEXT,
         profile_image TEXT
     );
 
@@ -217,6 +239,21 @@ def init_db():
         conn.execute("ALTER TABLE users ADD COLUMN last_login TEXT")
     if "profile_image" not in user_columns:
         conn.execute("ALTER TABLE users ADD COLUMN profile_image TEXT")
+    for column, definition in {
+        "email": "TEXT",
+        "email_verified": "INTEGER NOT NULL DEFAULT 0",
+        "verification_token": "TEXT",
+        "verification_expires_at": "TEXT",
+        "password_reset_token": "TEXT",
+        "password_reset_expires_at": "TEXT",
+        "login_otp_hash": "TEXT",
+        "login_otp_expires_at": "TEXT",
+        "failed_login_attempts": "INTEGER NOT NULL DEFAULT 0",
+        "locked_until": "TEXT",
+    }.items():
+        if column not in user_columns:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {column} {definition}")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL AND email != ''")
     customer_columns = {row[1] for row in conn.execute("PRAGMA table_info(customers)").fetchall()}
     for column, definition in {
         "address": "TEXT",
@@ -326,6 +363,21 @@ def now():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def validate_password(password):
+    """Return a clear policy error, or None when a new password is strong enough."""
+    if len(password or "") < 12:
+        return "Password must be at least 12 characters long."
+    if not any(char.islower() for char in password):
+        return "Password must include a lowercase letter."
+    if not any(char.isupper() for char in password):
+        return "Password must include an uppercase letter."
+    if not any(char.isdigit() for char in password):
+        return "Password must include a number."
+    if not any(not char.isalnum() for char in password):
+        return "Password must include a symbol."
+    return None
+
+
 def csrf_token():
     if "csrf_token" not in session:
         session["csrf_token"] = secrets.token_urlsafe(32)
@@ -360,18 +412,51 @@ app.jinja_env.globals.update(csrf_input=csrf_input, csrf_token=csrf_token)
 
 @app.before_request
 def protect_post_requests():
+    if session.get("user_id"):
+        conn = db()
+        current_user = conn.execute(
+            "SELECT username,full_name,role,profile_image FROM users WHERE id=? AND active=1",
+            (session["user_id"],)
+        ).fetchone()
+        conn.close()
+        if not current_user:
+            session.clear()
+            return redirect(url_for("login"))
+        session["username"] = current_user["username"]
+        session["full_name"] = current_user["full_name"]
+        session["role"] = current_user["role"]
+        session["profile_image"] = current_user["profile_image"]
+
     # Server-side RBAC: staff must not bypass admin URLs.
     admin_only_endpoints = {"delete_record_route", "restore_record", "users", "edit_user",
                             "toggle_user", "delete_user", "audit_logs", "admin_backup", "admin_restore",
                             "admin_gallery"}
-    if request.endpoint in admin_only_endpoints and str(session.get("role", "")).upper() != "ADMIN":
+    if request.endpoint in admin_only_endpoints and normalize_role(session.get("role")) != "ADMIN":
         # Allow unauthenticated to fall through to login_required (redirect) rather than 403
         if "user_id" in session:
             abort(403)
-    if request.method == "POST" and request.endpoint != "login":
+    if request.method == "POST":
         submitted = request.form.get("csrf_token", "")
         if not submitted or not hmac.compare_digest(submitted, session.get("csrf_token", "")):
             abort(400, description="Your form session expired. Please reload the page and try again.")
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if request.endpoint != "static":
+        response.headers.setdefault("Cache-Control", "no-store, max-age=0")
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+        "font-src 'self' data: https://cdn.jsdelivr.net https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    )
+    if app.config["SESSION_COOKIE_SECURE"]:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 
 def valid_date(value, field_name):
@@ -418,10 +503,132 @@ def login_required(f):
     return wrapper
 
 
+ROLE_ALIASES = {
+    "ADMIN": "ADMIN",
+    "ADMINISTRATOR": "ADMIN",
+    "MANAGER": "MANAGER",
+    "SALES_OFFICER": "SALES_OFFICER",
+    "SALES OFFICER": "SALES_OFFICER",
+    "INVENTORY_OFFICER": "INVENTORY_OFFICER",
+    "INVENTORY OFFICER": "INVENTORY_OFFICER",
+    "ACCOUNTANT": "ACCOUNTANT",
+    "VIEWER": "VIEWER",
+    "STAFF": "STAFF",
+}
+
+ROLE_LABELS = {
+    "ADMIN": "Administrator",
+    "MANAGER": "Manager",
+    "SALES_OFFICER": "Sales Officer",
+    "INVENTORY_OFFICER": "Inventory Officer",
+    "ACCOUNTANT": "Accountant",
+    "VIEWER": "Viewer",
+    "STAFF": "Staff",
+}
+
+ROLE_PERMISSIONS = {
+    "ADMIN": {
+        "view_dashboard", "view_users", "create_users", "edit_users", "deactivate_users",
+        "view_roles", "create_roles", "edit_roles", "delete_roles", "assign_permissions",
+        "view_customers", "create_customers", "edit_customers", "delete_customers",
+        "view_sales", "create_sales", "edit_sales", "delete_sales",
+        "view_purchases", "create_purchases", "edit_purchases", "delete_purchases",
+        "view_inventory", "manage_inventory",
+        "view_invoices", "create_invoices", "print_invoices", "download_invoices",
+        "view_reports", "export_reports",
+        "view_payments", "manage_payments",
+        "view_profiles", "edit_profile",
+    },
+    "MANAGER": {
+        "view_dashboard", "view_users", "create_users", "edit_users",
+        "view_customers", "create_customers", "edit_customers",
+        "view_sales", "create_sales", "edit_sales",
+        "view_purchases", "create_purchases", "edit_purchases",
+        "view_inventory", "manage_inventory",
+        "view_invoices", "create_invoices", "print_invoices",
+        "view_reports", "export_reports",
+        "view_payments", "manage_payments",
+        "view_profiles", "edit_profile",
+    },
+    "SALES_OFFICER": {
+        "view_dashboard", "view_customers", "create_customers", "edit_customers",
+        "view_sales", "create_sales", "edit_sales",
+        "view_invoices", "create_invoices", "print_invoices",
+        "view_payments", "manage_payments",
+        "view_reports", "export_reports",
+        "view_profiles", "edit_profile",
+    },
+    "INVENTORY_OFFICER": {
+        "view_dashboard", "view_purchases", "create_purchases", "edit_purchases",
+        "view_inventory", "manage_inventory",
+        "view_sales", "view_customers",
+        "view_reports", "export_reports",
+        "view_profiles", "edit_profile",
+    },
+    "ACCOUNTANT": {
+        "view_dashboard", "view_sales", "view_customers", "view_purchases",
+        "view_invoices", "print_invoices", "download_invoices",
+        "view_payments", "manage_payments",
+        "view_reports", "export_reports",
+        "view_profiles", "edit_profile",
+    },
+    "VIEWER": {
+        "view_dashboard", "view_reports", "view_profiles",
+    },
+    "STAFF": {
+        "view_dashboard", "view_customers", "create_customers", "edit_customers",
+        "view_sales", "create_sales", "edit_sales",
+        "view_purchases", "create_purchases", "edit_purchases",
+        "view_inventory", "manage_inventory",
+        "view_invoices", "print_invoices",
+        "view_reports", "export_reports",
+        "view_profiles", "edit_profile",
+    },
+}
+
+
+def normalize_role(role):
+    normalized = str(role or "STAFF").strip().upper().replace(" ", "_")
+    return ROLE_ALIASES.get(normalized, normalized)
+
+
+def user_permissions(role=None):
+    current = normalize_role(role if role is not None else session.get("role"))
+    return set(ROLE_PERMISSIONS.get(current, ROLE_PERMISSIONS.get("STAFF", set())))
+
+
+def user_has_permission(permission, role=None):
+    if role is not None:
+        perms = user_permissions(role)
+    else:
+        perms = user_permissions()
+    return "ADMIN" == normalize_role(role if role is not None else session.get("role")) or permission in perms
+
+
+def valid_role_name(raw_role):
+    normalized = normalize_role(raw_role)
+    if normalized not in ROLE_PERMISSIONS:
+        raise ValueError("Select a valid user role.")
+    return normalized
+
+
+def require_permission(permission_name):
+    def decorator(view_func):
+        @wraps(view_func)
+        def wrapper(*args, **kwargs):
+            if "user_id" not in session:
+                return redirect(url_for("login"))
+            if not user_has_permission(permission_name):
+                abort(403)
+            return view_func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
 def admin_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
-        if str(session.get("role", "")).upper() != "ADMIN":
+        if normalize_role(session.get("role")) != "ADMIN":
             abort(403)
         return f(*args, **kwargs)
     return wrapper
@@ -455,6 +662,96 @@ def get_float(name, default=0):
         return value
     except (InvalidOperation, ValueError):
         raise ValueError(f"Invalid value for {name.replace('_',' ')}.")
+
+
+def send_verification_email(email, token):
+    host = os.environ.get("ADUFARMS_SMTP_HOST", "smtp.gmail.com")
+    port = int(os.environ.get("ADUFARMS_SMTP_PORT", "587"))
+    username = os.environ.get("ADUFARMS_SMTP_USERNAME")
+    password = os.environ.get("ADUFARMS_SMTP_PASSWORD")
+    sender = os.environ.get("ADUFARMS_SMTP_FROM") or username
+    if not all((host, username, password, sender)):
+        return False
+    assert host is not None and username is not None and password is not None and sender is not None
+    base_url = os.environ.get("ADUFARMS_PUBLIC_URL", request.url_root.rstrip("/"))
+    verify_url = f"{base_url}/verify-email/{token}"
+    message = EmailMessage()
+    message["Subject"] = "Verify your ADUFARMS account"
+    message["From"] = sender
+    message["To"] = email
+    message.set_content(f"Verify your ADUFARMS account by opening this link:\n\n{verify_url}\n\nThis link expires in 24 hours.")
+    try:
+        with smtplib.SMTP(host, port, timeout=15) as smtp:
+            smtp.starttls()
+            smtp.login(username, password)
+            smtp.send_message(message)
+        return True
+    except (OSError, smtplib.SMTPException):
+        app.logger.exception("Verification email could not be sent")
+        return False
+
+
+def send_password_reset_email(email, token):
+    host = os.environ.get("ADUFARMS_SMTP_HOST", "smtp.gmail.com")
+    port = int(os.environ.get("ADUFARMS_SMTP_PORT", "587"))
+    username = os.environ.get("ADUFARMS_SMTP_USERNAME")
+    password = os.environ.get("ADUFARMS_SMTP_PASSWORD")
+    sender = os.environ.get("ADUFARMS_SMTP_FROM") or username
+    if not all((host, username, password, sender)):
+        return False
+    assert host is not None and username is not None and password is not None and sender is not None
+    base_url = os.environ.get("ADUFARMS_PUBLIC_URL", request.url_root.rstrip("/"))
+    reset_url = f"{base_url}/reset-password/{token}"
+    message = EmailMessage()
+    message["Subject"] = "Reset your ADUFARMS password"
+    message["From"] = sender
+    message["To"] = email
+    message.set_content(f"Reset your ADUFARMS password by opening this link:\n\n{reset_url}\n\nThis link expires in 1 hour. If you did not request this, ignore this message.")
+    try:
+        with smtplib.SMTP(host, port, timeout=15) as smtp:
+            smtp.starttls()
+            smtp.login(username, password)
+            smtp.send_message(message)
+        return True
+    except (OSError, smtplib.SMTPException):
+        app.logger.exception("Password reset email could not be sent")
+        return False
+
+
+def send_login_otp_email(email, code):
+    """Send a short-lived login code through the configured Gmail SMTP account."""
+    host = os.environ.get("ADUFARMS_SMTP_HOST", "smtp.gmail.com")
+    port = int(os.environ.get("ADUFARMS_SMTP_PORT", "587"))
+    username = os.environ.get("ADUFARMS_SMTP_USERNAME")
+    password = os.environ.get("ADUFARMS_SMTP_PASSWORD")
+    sender = os.environ.get("ADUFARMS_SMTP_FROM") or username
+    if not all((host, username, password, sender)):
+        return False
+    assert host is not None and username is not None and password is not None and sender is not None
+    message = EmailMessage()
+    message["Subject"] = "Your ADUFARMS sign-in code"
+    message["From"] = sender
+    message["To"] = email
+    message.set_content(
+        f"Your ADUFARMS sign-in code is: {code}\n\n"
+        "It expires in 10 minutes. Do not share this code with anyone."
+    )
+    try:
+        with smtplib.SMTP(host, port, timeout=15) as smtp:
+            smtp.starttls()
+            smtp.login(username, password)
+            smtp.send_message(message)
+        return True
+    except (OSError, smtplib.SMTPException):
+        app.logger.exception("Login OTP email could not be sent")
+        return False
+
+
+def is_gmail_address(value):
+    """Accept consumer Google mailboxes only for the sign-in identity."""
+    email = (value or "").strip().lower()
+    local, separator, domain = email.rpartition("@")
+    return bool(local and separator and domain == "gmail.com")
 
 
 def next_daily_id(prefix, table, column, conn=None, id_date=None):
@@ -793,26 +1090,94 @@ def index():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        username = request.form.get("username","").strip()
-        password = request.form.get("password","")
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
         conn = db()
         user = conn.execute("SELECT * FROM users WHERE username=? AND active=1", (username,)).fetchone()
-        conn.close()
-        if user and check_password_hash(user["password_hash"], password):
+        locked = bool(user and user["locked_until"] and user["locked_until"] > now())
+        if user and not locked and check_password_hash(user["password_hash"], password):
+            conn.execute("UPDATE users SET last_login=?,failed_login_attempts=0,locked_until=NULL WHERE id=?", (now(), user["id"]))
+            conn.commit()
+            conn.close()
             session.clear()
             session.permanent = True
             session["user_id"] = user["id"]
             session["username"] = user["username"]
             session["full_name"] = user["full_name"]
             session["role"] = user["role"]
-            conn = db()
-            conn.execute("UPDATE users SET last_login=? WHERE id=?", (now(), user["id"]))
-            conn.commit()
-            conn.close()
             log_action("LOGIN", username, f"user_id={user['id']}; role={user['role']}")
             return redirect(url_for("dashboard"))
-        flash("Invalid username or password.", "danger")
+        if user and not locked:
+            attempts = int(user["failed_login_attempts"] or 0) + 1
+            lock_until = None
+            if attempts >= 5:
+                lock_until = (datetime.now() + timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S")
+                attempts = 0
+                log_action("LOGIN LOCKED", username, "Too many failed sign-in attempts; locked for 15 minutes.")
+            conn.execute("UPDATE users SET failed_login_attempts=?,locked_until=? WHERE id=?", (attempts, lock_until, user["id"]))
+            conn.commit()
+        conn.close()
+        flash("Invalid credentials or account temporarily unavailable.", "danger")
     return render_template("login.html")
+
+
+@app.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        if is_gmail_address(email):
+            conn = db()
+            user = conn.execute("SELECT id,email FROM users WHERE lower(email)=lower(?) AND active=1", (email,)).fetchone()
+            if user and user["email"]:
+                token = secrets.token_urlsafe(32)
+                expires_at = (datetime.now() + timedelta(hours=1)).isoformat(timespec="seconds")
+                conn.execute("UPDATE users SET password_reset_token=?,password_reset_expires_at=? WHERE id=?", (token, expires_at, user["id"]))
+                conn.commit()
+                send_password_reset_email(user["email"], token)
+            conn.close()
+        flash("If that email is registered, a password reset link has been sent.", "info")
+        return redirect(url_for("login"))
+    return render_template("forgot_password.html")
+
+
+@app.route("/reset-password/<token>", methods=["GET", "POST"])
+def reset_password(token):
+    conn = db()
+    user = conn.execute("SELECT id FROM users WHERE password_reset_token=? AND password_reset_expires_at>? AND active=1", (token, now())).fetchone()
+    if not user:
+        conn.close()
+        flash("That password reset link is invalid or has expired.", "danger")
+        return redirect(url_for("login"))
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        confirmation = request.form.get("confirmation", "")
+        policy_error = validate_password(password)
+        if policy_error or password != confirmation:
+            conn.close()
+            flash(policy_error or "Passwords must match.", "danger")
+            return render_template("reset_password.html")
+        conn.execute("UPDATE users SET password_hash=?,password_reset_token=NULL,password_reset_expires_at=NULL WHERE id=?", (generate_password_hash(password), user["id"]))
+        conn.commit()
+        conn.close()
+        flash("Password reset successfully. You can now sign in.", "success")
+        return redirect(url_for("login"))
+    conn.close()
+    return render_template("reset_password.html")
+
+
+@app.route("/verify-email/<token>")
+def verify_email(token):
+    conn = db()
+    user = conn.execute("SELECT id FROM users WHERE verification_token=? AND verification_expires_at>?", (token, now())).fetchone()
+    if not user:
+        conn.close()
+        flash("That verification link is invalid or has expired.", "danger")
+        return redirect(url_for("login"))
+    conn.execute("UPDATE users SET email_verified=1,verification_token=NULL,verification_expires_at=NULL WHERE id=?", (user["id"],))
+    conn.commit()
+    conn.close()
+    flash("Email verified. You can now sign in with your email address.", "success")
+    return redirect(url_for("login"))
 
 
 @app.route("/logout")
@@ -825,6 +1190,7 @@ def logout():
 
 @app.route("/dashboard")
 @login_required
+@require_permission("view_dashboard")
 def dashboard():
     purchased, sold, stock = stock_summary()
     conn = db()
@@ -832,6 +1198,7 @@ def dashboard():
     month_start = date.today().replace(day=1).isoformat()
     sales = conn.execute("SELECT COALESCE(SUM(total_sale),0) v FROM sales WHERE deleted=0").fetchone()["v"]
     payments = conn.execute("SELECT COALESCE(SUM(amount),0) v FROM payments WHERE deleted=0").fetchone()["v"]
+    opening_balances = conn.execute("SELECT COALESCE(SUM(opening_balance),0) v FROM customers WHERE active=1").fetchone()["v"]
     purchase_cost = conn.execute("SELECT COALESCE(SUM(total_purchase_cost),0) v FROM purchases WHERE deleted=0").fetchone()["v"]
     transport = conn.execute("SELECT COALESCE(SUM(transport_cost),0) v FROM purchases WHERE deleted=0").fetchone()["v"]
     other = conn.execute("SELECT COALESCE(SUM(other_expenses),0) v FROM purchases WHERE deleted=0").fetchone()["v"]
@@ -843,7 +1210,7 @@ def dashboard():
         COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) > 0
         AND COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) < s.total_sale""").fetchone()["v"]
     unpaid = transactions - paid - part
-    outstanding = max(float(sales) - float(payments), 0)
+    outstanding = max(float(sales) + float(opening_balances) - float(payments), 0)
     expenses = float(purchase_cost) + float(transport) + float(other)
     profit = float(sales) - expenses
     recent = conn.execute("""SELECT s.sales_id transaction_id,s.sales_id,s.sale_date,c.name,s.quantity_kg,s.total_sale,
@@ -858,7 +1225,7 @@ def dashboard():
         FROM invoices i JOIN sales s ON s.transaction_id=i.transaction_id JOIN customers c ON c.id=s.customer_id
         WHERE s.deleted=0 ORDER BY i.id DESC LIMIT 6""").fetchall()
     outstanding_customers = conn.execute("""SELECT c.id,c.name,c.phone,
-        COALESCE(SUM(s.total_sale),0) total_sales,
+        COALESCE(SUM(s.total_sale),0) + c.opening_balance total_sales,
         COALESCE((SELECT SUM(p.amount) FROM payments p JOIN sales ps ON ps.transaction_id=p.transaction_id
                   WHERE ps.customer_id=c.id AND ps.deleted=0 AND p.deleted=0),0) total_paid
         FROM customers c JOIN sales s ON s.customer_id=c.id AND s.deleted=0
@@ -940,6 +1307,7 @@ def update_dashboard_image():
 
 @app.route("/purchases", methods=["GET","POST"])
 @login_required
+@require_permission("view_purchases")
 def purchases():
     if request.method == "POST":
         try:
@@ -998,6 +1366,7 @@ def purchases():
 
 @app.route("/sales", methods=["GET","POST"])
 @login_required
+@require_permission("view_sales")
 def sales():
     if request.method == "POST":
         try:
@@ -1076,6 +1445,7 @@ def sales():
 
 @app.route("/payments", methods=["GET","POST"])
 @login_required
+@require_permission("view_payments")
 def payments():
     if request.method == "POST":
         try:
@@ -1101,6 +1471,14 @@ def payments():
             by = session["username"]
             conn = db()
             try:
+                conn.execute("BEGIN IMMEDIATE")
+                live_paid = conn.execute(
+                    "SELECT COALESCE(SUM(amount),0) v FROM payments WHERE transaction_id=? AND deleted=0",
+                    (tid,)
+                ).fetchone()["v"]
+                live_balance = max(float(info["total_sale"]) - float(live_paid), 0)
+                if amount > live_balance + 0.005:
+                    raise ValueError(f"Payment exceeds outstanding balance of {money(live_balance)}.")
                 payment_reference = request.form.get("payment_reference", "").strip()
                 pay_date = valid_date(pay_date, "payment date")
                 if payment_reference and conn.execute(
@@ -1146,7 +1524,7 @@ def payments():
 
 @app.route("/purchases/<int:purchase_id>/edit", methods=["GET", "POST"])
 @login_required
-@admin_required
+@require_permission("edit_purchases")
 def edit_purchase(purchase_id):
     conn = db()
     row = conn.execute(f"SELECT p.* FROM purchases p WHERE p.id=? AND {visible_sql('p')}", (purchase_id,)).fetchone()
@@ -1168,6 +1546,7 @@ def edit_purchase(purchase_id):
             purchase_date = valid_date(purchase_date, "purchase date")
             conn = db()
             try:
+                conn.execute("BEGIN IMMEDIATE")
                 current = conn.execute("SELECT * FROM purchases WHERE id=?", (purchase_id,)).fetchone()
                 if not current:
                     raise ValueError("This transaction is unavailable.")
@@ -1198,7 +1577,7 @@ def edit_purchase(purchase_id):
 
 @app.route("/sales/<int:sale_id>/edit", methods=["GET", "POST"])
 @login_required
-@admin_required
+@require_permission("edit_sales")
 def edit_sale(sale_id):
     conn = db()
     row = conn.execute(f"""SELECT s.*,c.name customer_name,c.phone customer_phone,
@@ -1226,6 +1605,7 @@ def edit_sale(sale_id):
             sale_date = valid_date(sale_date, "sale date")
             conn = db()
             try:
+                conn.execute("BEGIN IMMEDIATE")
                 current = conn.execute("SELECT * FROM sales WHERE id=?", (sale_id,)).fetchone()
                 if not current:
                     raise ValueError("This transaction is unavailable.")
@@ -1255,7 +1635,7 @@ def edit_sale(sale_id):
 
 @app.route("/payments/<int:payment_id>/edit", methods=["GET", "POST"])
 @login_required
-@admin_required
+@require_permission("manage_payments")
 def edit_payment(payment_id):
     conn = db()
     row = conn.execute(f"""SELECT p.*,s.total_sale,s.deleted sale_deleted
@@ -1272,6 +1652,7 @@ def edit_payment(payment_id):
                 raise ValueError("Payment amount must be greater than zero.")
             conn = db()
             try:
+                conn.execute("BEGIN IMMEDIATE")
                 other_paid = conn.execute("SELECT COALESCE(SUM(amount),0) v FROM payments WHERE transaction_id=? AND id!=? AND deleted=0",
                                           (row["transaction_id"], payment_id)).fetchone()["v"]
                 if amount + float(other_paid) > float(row["total_sale"]) + 0.005:
@@ -1297,6 +1678,7 @@ def edit_payment(payment_id):
 
 @app.route("/customers", methods=["GET", "POST"])
 @login_required
+@require_permission("view_customers")
 def customers():
     if request.method == "POST":
         conn = None
@@ -1359,7 +1741,7 @@ def customer_statement(customer_id):
 
 @app.route("/customers/<int:customer_id>/edit", methods=["GET", "POST"])
 @login_required
-@admin_required
+@require_permission("edit_customers")
 def edit_customer(customer_id):
     conn = db()
     customer = conn.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
@@ -1394,7 +1776,7 @@ def edit_customer(customer_id):
 
 @app.route("/customers/<int:customer_id>/delete", methods=["POST"])
 @login_required
-@admin_required
+@require_permission("delete_customers")
 def delete_customer(customer_id):
     conn = db()
     try:
@@ -1536,7 +1918,7 @@ def permanently_delete_customer(customer_id):
 
 @app.route("/admin/invoices/<int:invoice_id>/delete", methods=["POST"])
 @login_required
-@admin_required
+@require_permission("delete_sales")
 def delete_invoice(invoice_id):
     reason = request.form.get("reason", "").strip()
     if not reason:
@@ -1676,6 +2058,7 @@ def restore_record(table, record_id):
 @app.route("/invoice/<transaction_id>", methods=["GET"])
 @app.route("/invoice/<transaction_id>/print", methods=["GET"])
 @login_required
+@require_permission("view_invoices")
 def invoice(transaction_id=None):
     if transaction_id is not None:
         tid = str(transaction_id).strip()
@@ -1684,6 +2067,8 @@ def invoice(transaction_id=None):
     info = sale_info(tid) if tid else None
     if info:
         info["invoice_number"] = ensure_invoice_record(info)
+    if info and request.path.rstrip("/").endswith("/print"):
+        return redirect(url_for("invoice_pdf", transaction_id=info["sales_id"], inline=1))
     payments_list = []
     invoice_matches = []
     invoice_history = []
@@ -1760,6 +2145,7 @@ def invoice(transaction_id=None):
 
 @app.route("/invoice/<transaction_id>/pdf")
 @login_required
+@require_permission("view_invoices")
 def invoice_pdf(transaction_id):
     info = sale_info(transaction_id)
     if not info:
@@ -1776,19 +2162,37 @@ def invoice_pdf(transaction_id):
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.enums import TA_RIGHT, TA_CENTER
         from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+        from reportlab.lib.utils import ImageReader
         from reportlab.lib.units import mm
+        from PIL import Image as PILImage
     except ImportError:
         flash("Install reportlab with: pip install reportlab", "danger")
         return redirect(url_for("invoice", transaction_id=transaction_id))
 
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=18*mm,leftMargin=18*mm,topMargin=18*mm,bottomMargin=18*mm)
+    logo_path = BASE_DIR / "static" / "images" / "branding" / "adufarms-logo.jpg"
+    watermark_buffer = io.BytesIO()
+    if logo_path.exists():
+        with PILImage.open(logo_path) as source_logo:
+            watermark_logo = source_logo.convert("RGBA")
+            watermark_logo.thumbnail((900, 700), PILImage.Resampling.LANCZOS)
+            watermark_logo.putalpha(watermark_logo.getchannel("A").point(lambda value: int(value * 0.12)))
+            watermark_logo.save(watermark_buffer, format="PNG", optimize=True, compress_level=9)
+        watermark_buffer.seek(0)
+    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=12*mm,leftMargin=12*mm,topMargin=12*mm,bottomMargin=12*mm)
+    def draw_watermark(canvas, document):
+        if not watermark_buffer.getbuffer().nbytes:
+            return
+        canvas.saveState()
+        canvas.drawImage(ImageReader(watermark_buffer), (A4[0] - 120*mm) / 2, (A4[1] - 92*mm) / 2,
+                         width=120*mm, height=92*mm, preserveAspectRatio=True,
+                         anchor='c', mask='auto')
+        canvas.restoreState()
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="SmallRight", parent=styles["Normal"], alignment=TA_RIGHT, fontSize=9))
     styles.add(ParagraphStyle(name="Center", parent=styles["Normal"], alignment=TA_CENTER))
     styles.add(ParagraphStyle(name="Muted", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#52665b")))
     story = []
-    logo_path = BASE_DIR / "static" / "images" / "branding" / "adufarms-logo.jpg"
     brand = [Paragraph(f"<b>{COMPANY['legal_name']}</b>", styles["Title"]),
              Paragraph(COMPANY["service_line"].upper(), styles["Heading3"]),
              Paragraph(COMPANY["document_note"], styles["Muted"])]
@@ -1805,37 +2209,53 @@ def invoice_pdf(transaction_id):
     t = Table(meta, colWidths=[28*mm,70*mm,32*mm,48*mm])
     t.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.4,colors.HexColor("#dce6df")),("BACKGROUND",(0,0),(-1,0),colors.HexColor("#e9f2eb")),("TEXTCOLOR",(0,0),(-1,0),colors.HexColor("#173c2b")),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold")]))
     story += [t, Spacer(1,15)]
-    data = [["Description","Quantity (KG)","Unit Price (GHS)","Total (GHS)"],
-            ["Maize supply — fresh maize distribution",f'{info["quantity_kg"]:,.2f}',money(info["selling_price_kg"]),money(info["total_sale"])]]
-    t2=Table(data,colWidths=[70*mm,35*mm,35*mm,40*mm])
+    data = [["Description","Qty","Unit","Unit Price (GHS)","Total (GHS)"],
+            [Paragraph("<b>Maize supply</b><br/><font color='#52665b'>Fresh maize distribution</font>", styles["Normal"]),
+             f'{info["quantity_kg"]:,.2f}', "KG", money(info["selling_price_kg"]), money(info["total_sale"])]]
+    t2=Table(data,colWidths=[68*mm,20*mm,17*mm,39*mm,42*mm])
     t2.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.5,colors.HexColor("#dce6df")),("BACKGROUND",(0,0),(-1,0),colors.HexColor("#173c2b")),("TEXTCOLOR",(0,0),(-1,0),colors.white),
-                            ("ALIGN",(1,1),(-1,-1),"RIGHT")]))
-    payment_data = [["Payment ID", "Date", "Method", "Reference", "Amount (GHS)"]]
-    payment_data.extend([[payment["payment_id"] or "-", pretty_date(payment["payment_date"]), payment["payment_method"] or "-", payment["payment_reference"] or "-", money(payment["amount"])] for payment in pdf_payments])
+                    ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("ALIGN",(1,1),(-1,-1),"RIGHT"),("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+                    ("FONTSIZE",(0,0),(-1,0),7.5),("FONTSIZE",(0,1),(-1,-1),8)]))
+    payment_cell = ParagraphStyle(name="PaymentCell", parent=styles["Normal"], fontSize=7.2, leading=8.4, spaceAfter=0)
+    payment_header = ParagraphStyle(name="PaymentHeader", parent=payment_cell, fontName="Helvetica-Bold", textColor=colors.white)
+    payment_data = [[Paragraph(label, payment_header) for label in ["Payment ID", "Date", "Method", "Reference", "Amount (GHS)"]]]
+    payment_data.extend([[Paragraph(str(payment["payment_id"] or "-"), payment_cell),
+                          Paragraph(pretty_date(payment["payment_date"]), payment_cell),
+                          Paragraph(str(payment["payment_method"] or "-"), payment_cell),
+                          Paragraph(str(payment["payment_reference"] or "-"), payment_cell),
+                          Paragraph(money(payment["amount"]), payment_cell)] for payment in pdf_payments])
     if len(payment_data) == 1:
-        payment_data.append(["No payment recorded", "-", "-", "-", money(0)])
-    payment_table = Table(payment_data, colWidths=[35*mm,32*mm,38*mm,38*mm,27*mm])
+        payment_data.append([Paragraph("No payment recorded", payment_cell), Paragraph("-", payment_cell), Paragraph("-", payment_cell), Paragraph("-", payment_cell), Paragraph(money(0), payment_cell)])
+    payment_table = Table(payment_data, colWidths=[32*mm,30*mm,34*mm,50*mm,28*mm])
     payment_table.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.4,colors.grey),
                                        ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#173c2b")),("TEXTCOLOR",(0,0),(-1,0),colors.white),
                                        ("ALIGN",(4,1),(4,-1),"RIGHT")]))
-    story += [t2, Spacer(1,12), Paragraph("<b>PAYMENT HISTORY</b>", styles["Heading3"]), payment_table, Spacer(1,15)]
+    delivery_text = f"<b>Delivery status:</b> Completed<br/>"
+    if info.get("customer_location"):
+        delivery_text += f"<b>Delivery location:</b> {info['customer_location']}<br/>"
+    delivery_text += "Payment is due on the invoice date unless otherwise agreed."
+    delivery = Table([[Paragraph("<b>DELIVERY INFORMATION</b>", styles["Muted"]), Paragraph(delivery_text, styles["Normal"])]], colWidths=[42*mm,144*mm])
+    delivery.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#f7faf7")),("BOX",(0,0),(-1,-1),0.4,colors.HexColor("#dce6df")),("VALIGN",(0,0),(-1,-1),"TOP"),("LEFTPADDING",(0,0),(-1,-1),8),("RIGHTPADDING",(0,0),(-1,-1),8),("TOPPADDING",(0,0),(-1,-1),8),("BOTTOMPADDING",(0,0),(-1,-1),8)]))
+    story += [t2, Spacer(1,12), delivery, Spacer(1,12), Paragraph("<b>PAYMENT HISTORY</b>", styles["Heading3"]), payment_table, Spacer(1,15)]
     totals=[["Subtotal",money(info["total_sale"])],
             ["Delivery fee","GHS 0.00"],
+            ["Discount","GHS 0.00"],
             ["Grand total",money(info["total_sale"])],
             ["Amount paid",money(info["total_paid"])],
             ["Outstanding balance",money(info["balance"])],
             ["Payment status",info["status"]]]
     t3=Table(totals,colWidths=[120*mm,60*mm],hAlign="RIGHT")
     t3.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.4,colors.grey),("ALIGN",(1,0),(1,-1),"RIGHT"),
-                            ("BACKGROUND",(0,2),(1,2),colors.HexColor("#e9f2eb")),
+                            ("BACKGROUND",(0,3),(1,3),colors.HexColor("#e9f2eb")),
                             ("BACKGROUND",(0,0),(0,-1),colors.HexColor("#f3f8f4"))]))
     payment_lines = [Paragraph(f"<b>MOBILE MONEY</b>: {COMPANY['momo_number']} · {COMPANY['momo_name']}", styles["Normal"]),
                      Paragraph(f"<b>BANK</b>: {COMPANY['bank_account']} · {COMPANY['bank_account_name']} · {COMPANY['bank_name']} ({COMPANY['bank_branch']})", styles["Normal"]),
                      Spacer(1, 12), Paragraph("Authorized signature: ____________________________", styles["Normal"]),
                      Paragraph("Payment is due on the invoice date unless otherwise agreed in writing.", styles["Muted"])]
     story += [t3, Spacer(1,12)] + payment_lines + [Spacer(1,18), Paragraph(f"Thank you for doing business with {COMPANY['legal_name']}. {COMPANY['tagline']}", styles["Center"])]
-    doc.build(story); buf.seek(0)
-    return send_file(buf, as_attachment=True, download_name=f"{info['invoice_number']}.pdf", mimetype="application/pdf")
+    doc.build(story, onFirstPage=draw_watermark, onLaterPages=draw_watermark); buf.seek(0)
+    inline = request.args.get("inline", "0").lower() in {"1", "true", "yes"}
+    return send_file(buf, as_attachment=not inline, download_name=f"{info['invoice_number']}.pdf", mimetype="application/pdf")
 
 
 @app.route("/search")
@@ -1869,6 +2289,7 @@ def search():
 
 @app.route("/reports")
 @login_required
+@require_permission("view_reports")
 def reports():
     start = request.args.get("start", "").strip()
     end = request.args.get("end", "").strip()
@@ -1976,6 +2397,7 @@ def transaction_history(transaction_id):
 
 @app.route("/profile", methods=["GET", "POST"])
 @login_required
+@require_permission("view_profiles")
 def profile():
     conn = db()
     user = conn.execute("SELECT * FROM users WHERE id=?", (session["user_id"],)).fetchone()
@@ -1984,8 +2406,13 @@ def profile():
         if action == "password":
             current = request.form.get("current_password", "")
             new_password = request.form.get("new_password", "")
-            if not check_password_hash(user["password_hash"], current) or len(new_password) < 8:
-                flash("Current password is incorrect or the new password is too short.", "danger")
+            policy_error = validate_password(new_password)
+            current_password_valid = check_password_hash(user["password_hash"], current)
+            if not current_password_valid or policy_error:
+                if not current_password_valid:
+                    flash("Current password is incorrect.", "danger")
+                else:
+                    flash(policy_error or "The new password does not meet the password policy.", "danger")
             else:
                 conn.execute("UPDATE users SET password_hash=? WHERE id=?", (generate_password_hash(new_password), user["id"]))
                 conn.commit()
@@ -2034,7 +2461,7 @@ def profile():
 @app.route("/users", methods=["GET","POST"])
 @app.route("/admin/users", methods=["GET","POST"])
 @login_required
-@admin_required
+@require_permission("view_users")
 def users():
     if request.method=="POST":
         username=request.form.get("username", "").strip()
@@ -2043,14 +2470,18 @@ def users():
         role=request.form.get("role","STAFF")
         conn = None
         try:
-            if not username or not full_name or len(password) < 8 or role not in {"ADMIN", "STAFF"}:
-                raise ValueError("Username, full name, valid role and an 8-character password are required.")
+            normalized_role = valid_role_name(role)
+            policy_error = validate_password(password)
+            if not username or not full_name:
+                raise ValueError("Username and full name are required.")
+            if policy_error:
+                raise ValueError(policy_error)
             conn=db()
             conn.execute("INSERT INTO users(username,full_name,password_hash,role,created_at) VALUES(?,?,?,?,?)",
-                         (username,full_name,generate_password_hash(password),role,now()))
+                         (username,full_name,generate_password_hash(password),normalized_role,now()))
             conn.commit()
-            log_action("USER CREATED", username, f"role={role}; created_by={actor_label()}")
-            log_action("ADMIN ACTION", username, f"USER CREATED role={role}")
+            log_action("USER CREATED", username, f"role={normalized_role}; created_by={actor_label()}")
+            log_action("ADMIN ACTION", username, f"USER CREATED role={normalized_role}")
             flash("User created.", "success")
         except ValueError as error:
             flash(str(error), "danger")
@@ -2064,12 +2495,19 @@ def users():
     conn=db()
     rows=conn.execute("SELECT id,username,full_name,role,active,created_at FROM users ORDER BY id").fetchall()
     conn.close()
-    return render_template("users.html", rows=rows)
+    return render_template("users.html", rows=rows, role_permissions=ROLE_PERMISSIONS, role_labels=ROLE_LABELS)
+
+
+@app.route("/roles")
+@login_required
+@require_permission("view_roles")
+def roles():
+    return redirect(url_for("users"))
 
 
 @app.route("/users/<int:user_id>/edit", methods=["GET", "POST"])
 @login_required
-@admin_required
+@require_permission("edit_users")
 def edit_user(user_id):
     conn = db()
     row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
@@ -2081,37 +2519,39 @@ def edit_user(user_id):
         full_name = request.form["full_name"].strip()
         password = request.form.get("password", "")
         role = request.form.get("role", "STAFF")
-        if not username or not full_name or role not in {"ADMIN", "STAFF"}:
-            flash("Enter valid user details.", "danger")
-        else:
-            try:
-                if password:
-                    if len(password) < 8:
-                        raise ValueError("Password must be at least 8 characters.")
-                    conn.execute("UPDATE users SET username=?,full_name=?,password_hash=?,role=? WHERE id=?",
-                                 (username, full_name, generate_password_hash(password), role, user_id))
-                    conn.commit()
-                    log_action("PASSWORD CHANGED", username, f"user_id={user_id}; changed_by={actor_label()}")
-                else:
-                    conn.execute("UPDATE users SET username=?,full_name=?,role=? WHERE id=?",
-                                 (username, full_name, role, user_id))
-                    conn.commit()
-                log_action("USER UPDATED", username, f"user_id={user_id}; role={role}")
-                log_action("ADMIN ACTION", username, f"USER UPDATED user_id={user_id}")
-                flash("User updated.", "success")
-                conn.close()
-                return redirect(url_for("users"))
-            except ValueError as error:
-                flash(str(error), "danger")
-            except sqlite3.IntegrityError:
-                flash("Username already exists.", "danger")
+        try:
+            normalized_role = valid_role_name(role)
+            if not username or not full_name:
+                raise ValueError("Enter valid user details.")
+            if password:
+                policy_error = validate_password(password)
+                if policy_error:
+                    raise ValueError(policy_error)
+            if password:
+                conn.execute("UPDATE users SET username=?,full_name=?,password_hash=?,role=? WHERE id=?",
+                             (username, full_name, generate_password_hash(password), normalized_role, user_id))
+                conn.commit()
+                log_action("PASSWORD CHANGED", username, f"user_id={user_id}; changed_by={actor_label()}")
+            else:
+                conn.execute("UPDATE users SET username=?,full_name=?,role=? WHERE id=?",
+                             (username, full_name, normalized_role, user_id))
+                conn.commit()
+            log_action("USER UPDATED", username, f"user_id={user_id}; role={normalized_role}")
+            log_action("ADMIN ACTION", username, f"USER UPDATED user_id={user_id}")
+            flash("User updated.", "success")
+            conn.close()
+            return redirect(url_for("users"))
+        except ValueError as error:
+            flash(str(error), "danger")
+        except sqlite3.IntegrityError:
+            flash("Username already exists.", "danger")
     conn.close()
     return render_template("edit_record.html", kind="user", record=row)
 
 
 @app.route("/users/<int:user_id>/toggle", methods=["POST"])
 @login_required
-@admin_required
+@require_permission("deactivate_users")
 def toggle_user(user_id):
     conn=db()
     target = conn.execute("SELECT username, active FROM users WHERE id=?", (user_id,)).fetchone()
@@ -2141,16 +2581,53 @@ def admin_gallery():
 @login_required
 @admin_required
 def audit_logs():
+    query = request.args.get("q", "").strip()
+    action = request.args.get("action", "").strip().upper()
+    start = request.args.get("start", "").strip()
+    end = request.args.get("end", "").strip()
     conn = db()
-    rows = conn.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT 500").fetchall()
+    clauses, params = [], []
+    if query:
+        clauses.append("(username LIKE ? OR action LIKE ? OR reference LIKE ? OR details LIKE ?)")
+        params.extend([f"%{query}%"] * 4)
+    if action:
+        clauses.append("upper(action) LIKE ?")
+        params.append(f"%{action}%")
+    if start:
+        clauses.append("created_at >= ?")
+        params.append(start)
+    if end:
+        try:
+            end_exclusive = (datetime.strptime(end, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+        except ValueError:
+            end_exclusive = end
+        clauses.append("created_at < ?")
+        params.append(end_exclusive)
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    rows = conn.execute(
+        f"SELECT * FROM audit_log{where} ORDER BY id DESC LIMIT 1000", params
+    ).fetchall()
     reversals = conn.execute("SELECT * FROM reversals ORDER BY id DESC LIMIT 100").fetchall()
     conn.close()
-    return render_template("audit_logs.html", rows=rows, reversals=reversals)
+    if request.args.get("format") == "csv":
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, lineterminator="\n")
+        writer.writerow(["Timestamp", "User", "Action", "Reference", "Details"])
+        for row in rows:
+            writer.writerow([row["created_at"], row["username"], row["action"], row["reference"], row["details"]])
+        return send_file(
+            io.BytesIO(buffer.getvalue().encode("utf-8-sig")),
+            as_attachment=True,
+            download_name=f"adufarms-audit-log-{date.today().isoformat()}.csv",
+            mimetype="text/csv",
+        )
+    return render_template("audit_logs.html", rows=rows, reversals=reversals,
+                           query=query, action=action, start=start, end=end)
 
 
 @app.route("/users/<int:user_id>/delete", methods=["POST"])
 @login_required
-@admin_required
+@require_permission("deactivate_users")
 def delete_user(user_id):
     conn = db()
     target = conn.execute("SELECT username FROM users WHERE id=?", (user_id,)).fetchone()
@@ -2210,14 +2687,28 @@ def admin_restore():
 
 @app.route("/stock")
 @login_required
+@require_permission("view_inventory")
 def stock():
     purchased, sold, available = stock_summary()
     conn = db()
     movements = conn.execute(
-        "SELECT * FROM stock_movements ORDER BY id DESC LIMIT 200").fetchall()
+        "SELECT * FROM stock_movements ORDER BY id DESC LIMIT 1000").fetchall()
     low = available <= 100
     depleted = available <= 0
     conn.close()
+    if request.args.get("format") == "csv":
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, lineterminator="\n")
+        writer.writerow(["Date", "Movement Type", "Reference", "Quantity KG", "Recorded By", "Notes"])
+        for movement in movements:
+            writer.writerow([movement["movement_date"], movement["movement_type"], movement["reference"],
+                             movement["quantity_kg"], movement["created_by"], movement["notes"]])
+        return send_file(
+            io.BytesIO(buffer.getvalue().encode("utf-8-sig")),
+            as_attachment=True,
+            download_name=f"adufarms-stock-movements-{date.today().isoformat()}.csv",
+            mimetype="text/csv",
+        )
     return render_template("stock.html", purchased=purchased, sold=sold,
                            available=available, movements=movements,
                            low=low, depleted=depleted)
@@ -2277,7 +2768,16 @@ def assistant():
 
 @app.route("/health")
 def health():
-    return {"status":"ok","application":"ADUFARMS","time":now()}
+    try:
+        conn = db()
+        try:
+            conn.execute("SELECT 1 FROM users LIMIT 1").fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        app.logger.exception("Health check database failure")
+        return {"status": "degraded", "application": "ADUFARMS", "time": now()}, 503
+    return {"status": "ok", "application": "ADUFARMS", "time": now()}
 
 
 @app.errorhandler(403)
@@ -2307,4 +2807,6 @@ def server_error(error):
 
 if __name__ == "__main__":
     init_db()
-    app.run(debug=os.environ.get("ADUFARMS_DEBUG", "0") == "1", use_reloader=False, host="127.0.0.1", port=5000)
+    app.run(debug=os.environ.get("ADUFARMS_DEBUG", "0") == "1", use_reloader=False,
+            host=os.environ.get("ADUFARMS_HOST", "127.0.0.1"),
+            port=int(os.environ.get("ADUFARMS_PORT", "5000")))

@@ -16,7 +16,8 @@ A Flask + SQLite web application for maize trading/distribution.
 - Verified database assistant for stock, activity, balances and top-customer questions
 - Official branding path: `static/images/branding/adufarms-logo.jpg`
 - SQLite database
-- Basic audit log
+- Filterable audit log with CSV export
+- Stock-movement CSV export for warehouse reconciliation
 - Responsive business interface
 
 ## Run on Windows PowerShell
@@ -32,6 +33,28 @@ python app.py
 Then open:
 http://127.0.0.1:5000
 
+## Production on Windows
+
+Set a stable secret before starting the production server. The application refuses to start in production without it.
+
+```powershell
+$env:ADUFARMS_ENV = "production"
+$env:ADUFARMS_SECRET_KEY = "generate-a-long-random-secret"
+$env:ADUFARMS_COOKIE_SECURE = "1" # Use only when served over HTTPS
+$env:ADUFARMS_HOST = "127.0.0.1"
+$env:ADUFARMS_PORT = "5000"
+ .\.venv\Scripts\Activate.ps1
+python run_production.py
+```
+
+Use a reverse proxy with HTTPS when exposing the service beyond the local machine. Keep `ADUFARMS_COOKIE_SECURE=0` for plain local HTTP development.
+
+Run the automated checks with:
+
+```powershell
+python -m pytest -q
+```
+
 ## First login
 Use an administrator account already provisioned for your environment. The application does not display or create a known default password.
 
@@ -41,6 +64,18 @@ The AI Assistant is local and database-backed. It does not call an external prov
 
 ## Database
 The SQLite database `adufarms.db` is created automatically on first run.
+
+Administrator backup and restore actions create integrity-checked SQLite snapshots. Restore first creates a safety backup and replaces the database atomically. Keep the `backups` directory on a separate protected drive for disaster recovery.
+
+For automatic protection, configure a second drive or synchronized protected folder and run the scheduled backup command daily:
+
+```powershell
+$env:ADUFARMS_OFFSITE_BACKUP_DIR = "D:\ADUFARMS-Backups"
+$env:ADUFARMS_BACKUP_KEEP_COUNT = "90"
+python run_backup.py
+```
+
+`run_backup.py` creates a consistent SQLite snapshot, writes a SHA-256 manifest, verifies the snapshot, and copies both files to the off-site folder. Schedule it with Windows Task Scheduler after the application account has access to that folder. A backup is only truly protected when the off-site folder is on a different disk, machine, or managed cloud-synchronization service.
 
 ## Notes
 This version is designed as a solid local business system. For multi-computer/network deployment, use a production WSGI server and a shared database such as PostgreSQL.

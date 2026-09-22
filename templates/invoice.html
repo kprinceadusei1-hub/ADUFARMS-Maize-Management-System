@@ -84,6 +84,7 @@
 
   {% if info %}
   <article class="invoice-paper">
+    <div class="invoice-watermark" aria-hidden="true"><img src="{{ url_for('static', filename='images/branding/adufarms-logo.jpg') }}" alt=""></div>
     <div class="invoice-accent" aria-hidden="true"></div>
     <header class="invoice-header">
       <div class="document-brand">
@@ -97,7 +98,7 @@
       <div class="invoice-meta">
         <div class="invoice-label">INVOICE</div>
         <strong>{{ info.invoice_number }}</strong>
-        <span>Invoice date: {{ info.sale_date|pretty_date }}</span>
+        <span>Date: {{ info.sale_date|pretty_date }}</span>
         <span class="invoice-status status-{{ info.status|lower|replace(' ', '-') }}">{{ info.status }}</span>
       </div>
     </header>
@@ -106,7 +107,8 @@
       <div class="invoice-info-block">
         <span class="invoice-section-label">Billed to</span>
         <h3>{{ info.customer_name }}</h3>
-        <p>Phone: {{ info.customer_phone or '—' }}<br>Address: {{ info.customer_address or info.customer_location or '—' }}</p>
+        {% if info.customer_phone %}<p><b>Phone</b><br>{{ info.customer_phone }}</p>{% endif %}
+        {% if info.customer_address or info.customer_location %}<p><b>Address</b><br>{{ info.customer_address or info.customer_location }}</p>{% endif %}
       </div>
       <div class="invoice-info-block">
         <span class="invoice-section-label">Transaction details</span>
@@ -115,7 +117,8 @@
           <dt>Sales ID</dt><dd>{{ info.sales_id }}</dd>
           <dt>Invoice date</dt><dd>{{ info.sale_date|pretty_date }}</dd>
           <dt>Due date</dt><dd>{{ info.sale_date|pretty_date }}</dd>
-          <dt>Issued by</dt><dd>{{ info.staff_user or '—' }}</dd>
+          {% if info.staff_user %}<dt>Issued by</dt><dd>{{ info.staff_user }}</dd>{% endif %}
+          <dt>Delivery status</dt><dd><span class="mini-status mini-status-complete">COMPLETED</span></dd>
         </dl>
       </div>
     </section>
@@ -125,7 +128,8 @@
         <thead>
           <tr>
             <th>Description</th>
-            <th class="num">Quantity (KG)</th>
+            <th class="num">Qty</th>
+            <th>Unit</th>
             <th class="num">Unit price</th>
             <th class="num">Total</th>
           </tr>
@@ -133,7 +137,8 @@
         <tbody>
           <tr>
             <td><strong>Maize supply</strong><small>Fresh maize distribution</small></td>
-            <td class="num">{{ '{:,.2f}'.format(info.quantity_kg) }} KG</td>
+            <td class="num">{{ '{:,.2f}'.format(info.quantity_kg) }}</td>
+            <td>KG</td>
             <td class="num">{{ info.selling_price_kg|money }}</td>
             <td class="num">{{ info.total_sale|money }}</td>
           </tr>
@@ -145,7 +150,7 @@
       <div class="delivery-note">
         <span class="invoice-section-label">Delivery information</span>
         <p>
-          <strong>Delivery status:</strong> Completed<br>
+          <strong>Delivery status:</strong> <span class="mini-status mini-status-complete">COMPLETED</span><br>
           {% if info.customer_location %}<strong>Delivery location:</strong> {{ info.customer_location }}<br>{% endif %}
           Payment is due on the invoice date unless otherwise agreed.
         </p>
@@ -153,10 +158,11 @@
       <div class="invoice-totals">
         <div><span>Subtotal</span><strong>{{ info.total_sale|money }}</strong></div>
         <div><span>Delivery fee</span><strong>GHS 0.00</strong></div>
+        <div><span>Discount</span><strong>GHS 0.00</strong></div>
         <div class="grand-total"><span>Grand total</span><strong>{{ info.total_sale|money }}</strong></div>
         <div><span>Amount paid</span><strong>{{ info.total_paid|money }}</strong></div>
         <div class="balance"><span>Outstanding balance</span><strong>{{ info.balance|money }}</strong></div>
-        <div class="status-total"><span>Payment status</span><strong>{{ info.status }}</strong></div>
+        <div class="status-total"><span>Payment status</span><strong><span class="invoice-status status-{{ info.status|lower|replace(' ', '-') }}">{{ info.status }}</span></strong></div>
       </div>
     </section>
 
