@@ -26,6 +26,33 @@ document.addEventListener("DOMContentLoaded", function () {
 		loginSubmit.disabled = true;
 		loginSubmit.classList.add("is-loading");
 	});
+	const paymentCustomer = document.getElementById("paymentCustomer");
+	const paymentSale = document.getElementById("paymentSale");
+	if (paymentCustomer && paymentSale) {
+		const paymentParams = new URLSearchParams(window.location.search);
+		const requestedCustomer = paymentParams.get("customer_id") || "";
+		const requestedSale = paymentParams.get("sales_id") || paymentParams.get("transaction_id") || "";
+		const filterPaymentSales = function (preserveRequested) {
+			const customer = String(paymentCustomer.value || "");
+			let firstMatch = "";
+			Array.from(paymentSale.options).forEach(function (option) {
+				if (!option.value) return;
+				const matches = String(option.dataset.customer || "") === customer;
+				option.hidden = !matches;
+				option.disabled = !matches;
+				if (matches && !firstMatch) firstMatch = option.value;
+			});
+			paymentSale.disabled = !customer || !firstMatch;
+			if (paymentSale.options[0]) paymentSale.options[0].textContent = customer
+				? (firstMatch ? "Select outstanding sale" : "No outstanding sales for this customer")
+				: "Select customer first";
+			if (preserveRequested && requestedSale && firstMatch === requestedSale) paymentSale.value = requestedSale;
+			else if (!preserveRequested) paymentSale.value = firstMatch || "";
+		};
+		paymentCustomer.addEventListener("change", function () { filterPaymentSales(false); });
+		if (requestedCustomer) paymentCustomer.value = requestedCustomer;
+		filterPaymentSales(Boolean(requestedCustomer));
+	}
 	const body = document.body;
 	const sidebar = document.getElementById("appSidebar");
 	const sidebarCollapse = document.getElementById("sidebarCollapse");
@@ -88,6 +115,7 @@ document.addEventListener("DOMContentLoaded", function () {
 	if (modalElement && typeof bootstrap !== "undefined") {
 		const modal = new bootstrap.Modal(modalElement);
 		const message = document.getElementById("actionConfirmMessage");
+		const notice = modalElement.querySelector(".modal-body .alert");
 		const confirmButton = document.getElementById("actionConfirmButton");
 		const title = modalElement.querySelector(".modal-title");
 		const reasonLabel = modalElement.querySelector("label[for='reversalReason']");
@@ -107,7 +135,8 @@ document.addEventListener("DOMContentLoaded", function () {
 				pendingForm = form;
 				const isRestore = form.action.includes("/restore");
 				if (title) title.textContent = isRestore ? "Confirm Transaction Restoration" : "Confirm Transaction Reversal";
-				if (message) message.textContent = isRestore ? "Review this transaction before restoring it to active records." : "This will reverse the transaction and retain a complete audit record. It will not permanently delete the record.";
+				if (notice) notice.innerHTML = '<i class="bi bi-exclamation-triangle-fill me-2" aria-hidden="true"></i>' + (isRestore ? "This restoration is recorded in the audit log and returns the transaction to active records." : "This reversal is recorded in the audit log and does not permanently delete the transaction.");
+				if (message) { message.textContent = ""; message.classList.add("d-none"); }
 				if (reasonLabel) reasonLabel.innerHTML = (isRestore ? "Business reason for restoration" : "Business reason for reversal") + ' <span class="required-mark">*</span>';
 				if (confirmButton) { confirmButton.textContent = isRestore ? "Restore Transaction" : "Reverse Transaction"; confirmButton.className = "btn " + (isRestore ? "btn-success" : "btn-warning"); }
 				if (reversalReason) { reversalReason.value = ""; reversalReason.placeholder = isRestore ? "Example: Reversal was made in error" : "Example: Duplicate or incorrect transaction"; reversalReason.classList.remove("is-invalid"); }

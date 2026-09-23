@@ -34,9 +34,10 @@ def client():
 def seed_admin():
     conn = application.db()
     conn.execute(
-        "INSERT INTO users(username,full_name,password_hash,role,active,created_at) VALUES(?,?,?,?,?,?)",
+        "INSERT OR IGNORE INTO users(username,full_name,password_hash,role,active,created_at) VALUES(?,?,?,?,?,?)",
         ("admin", "Test Admin", generate_password_hash("StrongPassword1!"), "ADMIN", 1, application.now()),
     )
+    conn.execute("UPDATE users SET role='ADMIN',active=1 WHERE username='admin'")
     conn.commit()
     conn.close()
 
@@ -108,6 +109,80 @@ def test_session_role_is_refreshed_and_deactivated_users_are_logged_out(client):
     conn.commit()
     conn.close()
     assert client.get("/dashboard").status_code == 302
+
+
+def test_viewer_cannot_read_customer_or_transaction_details(client):
+    conn = application.db()
+    conn.execute("UPDATE users SET active=1,role='VIEWER' WHERE id=1")
+    customer_id = conn.execute(
+        "INSERT INTO customers(name,phone,opening_balance,created_at) VALUES(?,?,?,?)",
+        ("Private Customer", "111", 0, application.now()),
+    ).lastrowid
+    conn.commit()
+    conn.close()
+    with client.session_transaction() as session:
+        session.update(user_id=1, username="admin", full_name="Test Admin", role="VIEWER")
+    assert client.get(f"/customers/{customer_id}").status_code == 403
+    assert client.get("/search?q=Private").status_code == 403
+
+
+def test_invoice_opens_payment_collection_for_unpaid_sale(client):
+    seed_admin()
+    conn = application.db()
+    conn.execute("UPDATE users SET active=1,role='ADMIN' WHERE id=1")
+    customer_id = conn.execute(
+        "INSERT INTO customers(name,phone,created_at) VALUES(?,?,?)",
+        ("Payment Customer", "222", application.now()),
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO sales(transaction_id,sales_id,invoice_number,sale_date,customer_id,quantity_kg,selling_price_kg,total_sale,staff_user,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        ("ADU-TEST-1", "ADU-SAL-TEST-1", "ADU-INV-TEST-1", "2026-09-22", customer_id, 10, 5, 50, "admin", application.now()),
+    )
+    conn.execute(
+        "INSERT INTO invoices(invoice_number,transaction_id,sales_id,invoice_date,generated_by,generated_at) VALUES(?,?,?,?,?,?)",
+        ("ADU-INV-TEST-1", "ADU-TEST-1", "ADU-SAL-TEST-1", "2026-09-22", "admin", application.now()),
+    )
+    conn.commit()
+    conn.close()
+    login_session(client)
+
+    invoice_response = client.get("/invoice/ADU-SAL-TEST-1")
+    assert invoice_response.status_code == 200
+    assert b"Record payment" in invoice_response.data
+    assert b"payments?customer_id=" in invoice_response.data
+
+    payment_response = client.get(
+        "/payments?customer_id=%s&sales_id=ADU-SAL-TEST-1" % customer_id
+    )
+    assert payment_response.status_code == 200
+    assert b"ADU-SAL-TEST-1" in payment_response.data
+
+
+def test_customer_creation_rejects_duplicate_normalized_identity(client):
+    seed_admin()
+    login_session(client)
+    conn = application.db()
+    conn.execute(
+        "INSERT INTO customers(name,phone,created_at) VALUES(?,?,?)",
+        ("Lord Sekyi", "059 905 5062", application.now()),
+    )
+    conn.commit()
+    before = conn.execute("SELECT COUNT(*) FROM customers").fetchone()[0]
+    conn.close()
+    with client.session_transaction() as session:
+        session["csrf_token"] = "duplicate-test-csrf"
+    response = client.post("/customers", data={
+        "csrf_token": "duplicate-test-csrf",
+        "name": "  lord   sekyi ",
+        "phone": "059-905-5062",
+        "opening_balance": "0",
+        "customer_type": "RETAIL",
+    })
+    assert response.status_code == 200
+    assert b"This customer already exists" in response.data
+    conn = application.db()
+    assert conn.execute("SELECT COUNT(*) FROM customers").fetchone()[0] == before
+    conn.close()
 
 
 def test_backup_restore_verifies_and_preserves_safety_copy(tmp_path, monkeypatch):

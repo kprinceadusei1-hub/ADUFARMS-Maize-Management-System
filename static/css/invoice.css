@@ -60,13 +60,14 @@
 .document-brand h1 {
   margin: 0;
   font-family: 'Space Grotesk', sans-serif;
-  font-size: 2rem;
+  font-size: 2.1rem;
+  font-weight: 800;
   color: var(--sidebar, #123b2a);
 }
 
 .document-brand div:last-child {
-  color: #6e8275;
-  font-size: 0.72rem;
+  color: #163624;
+  font-size: 0.82rem;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -75,20 +76,22 @@
 .document-brand small {
   display: block;
   margin-top: 0.25rem;
-  color: #7b8a82;
-  font-size: 0.68rem;
+  color: #2a4736;
+  font-size: 0.78rem;
+  font-weight: 600;
 }
 
 .invoice-meta {
-  font-size: 0.8rem;
+  font-size: 0.88rem;
   line-height: 1.8;
-  color: #2d3a34;
+  color: #163624;
+  font-weight: 600;
 }
 
 .meta-title {
-  font-size: 1.15rem;
+  font-size: 1.25rem;
   font-weight: 800;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--sidebar, #123b2a);
 }
@@ -98,28 +101,29 @@
   z-index: 1;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
+  gap: 1.2rem;
   margin-top: 1.5rem;
 }
 
 .customer-box {
-  background: #f7faf7;
-  border: 1px solid rgba(18, 59, 42, 0.09);
+  background: #f6faf6;
+  border: 1.5px solid rgba(18, 59, 42, 0.12);
   border-radius: 12px;
-  padding: 1rem 1.1rem;
+  padding: 1.1rem 1.2rem;
   line-height: 1.8;
-  color: #2b3a34;
-  font-size: 0.88rem;
+  color: #0d1a13;
+  font-size: 0.92rem;
+  font-weight: 500;
 }
 
 .customer-box .label {
   display: block;
-  color: #6d8178;
-  font-size: 0.7rem;
+  color: #163624;
+  font-size: 0.82rem;
   font-weight: 800;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  margin-bottom: 0.3rem;
+  margin-bottom: 0.35rem;
 }
 
 .invoice-table-wrap {
@@ -131,24 +135,31 @@
 .invoice-table {
   width: 100%;
   border-collapse: collapse;
-  border: 1px solid rgba(18, 59, 42, 0.12);
+  border: 1.5px solid rgba(18, 59, 42, 0.14);
   border-radius: 12px;
   overflow: hidden;
 }
 
 .invoice-table th,
 .invoice-table td {
-  padding: 0.9rem 1rem;
-  border-bottom: 1px solid rgba(18, 59, 42, 0.08);
+  padding: 0.95rem 1.1rem;
+  border-bottom: 1px solid rgba(18, 59, 42, 0.1);
   vertical-align: middle;
 }
 
 .invoice-table thead th {
-  background: #edf4ee;
-  color: var(--sidebar, #123b2a);
-  font-size: 0.72rem;
+  background: #eef5ef;
+  color: #0c1811;
+  font-size: 0.8rem;
+  font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.invoice-table tbody td {
+  font-size: 0.92rem;
+  color: #0d1a13;
+  font-weight: 500;
 }
 
 .invoice-table tbody tr:last-child td {
@@ -164,19 +175,19 @@
 }
 
 .totals-box table {
-  width: min(100%, 440px);
+  width: min(100%, 460px);
   border-collapse: collapse;
   background: #fafcfb;
-  border: 1px solid rgba(18, 59, 42, 0.08);
+  border: 1.5px solid rgba(18, 59, 42, 0.12);
   border-radius: 12px;
   overflow: hidden;
 }
 
 .totals-box th,
 .totals-box td {
-  padding: 0.72rem 0.9rem;
-  border-bottom: 1px solid rgba(18, 59, 42, 0.08);
-  font-size: 0.88rem;
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid rgba(18, 59, 42, 0.1);
+  font-size: 0.92rem;
 }
 
 .totals-box tr:last-child th,
@@ -186,31 +197,35 @@
 
 .totals-box th {
   background: #eef6ef;
-  color: #294d39;
+  color: #163624;
+  font-weight: 800;
   text-align: left;
 }
 
 .totals-box td {
   text-align: right;
-  font-weight: 700;
+  font-weight: 800;
+  color: #07160f;
 }
 
 .payment-block {
   position: relative;
   z-index: 1;
   margin-top: 1.5rem;
-  background: #f7faf7;
-  border: 1px solid rgba(18, 59, 42, 0.08);
+  background: #f6faf6;
+  border: 1.5px solid rgba(18, 59, 42, 0.12);
   border-radius: 8px;
-  padding: 1rem 1.2rem;
-  font-size: 0.82rem;
+  padding: 1.2rem 1.4rem;
+  font-size: 0.9rem;
   line-height: 1.7;
+  color: #0d1a13;
+  font-weight: 500;
 }
 
 .payment-block-title {
-  margin-bottom: 0.65rem;
+  margin-bottom: 0.75rem;
   color: #123b2a;
-  font-size: 0.78rem;
+  font-size: 0.84rem;
   font-weight: 800;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -224,17 +239,23 @@
 
 .payment-table th,
 .payment-table td {
-  padding: 0.55rem 0.6rem;
-  border: 1px solid rgba(18, 59, 42, 0.1);
-  font-size: 0.76rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(18, 59, 42, 0.12);
 }
 
 .payment-table th {
   background: #123b2a;
   color: #fff;
-  font-size: 0.66rem;
-  letter-spacing: 0.05em;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+.payment-table td {
+  font-size: 0.88rem;
+  color: #0d1a13;
+  font-weight: 600;
 }
 
 .payment-empty {

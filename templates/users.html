@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}User Management – ADUFARMS{% endblock %}
 {% block content %}
+{% set role_colors = {'ADMIN': 'primary', 'MANAGER': 'info', 'SALES_OFFICER': 'success', 'INVENTORY_OFFICER': 'warning', 'ACCOUNTANT': 'dark', 'VIEWER': 'secondary', 'STAFF': 'secondary'} %}
 <div class="dashboard-heading">
   <div>
     <span class="eyebrow"><i class="bi bi-people-fill"></i> ACCESS CONTROL</span>
@@ -9,120 +10,296 @@
   </div>
 </div>
 
-<div class="card mb-4">
-  <div class="card-body">
-    <h5 class="card-title mb-3"><i class="bi bi-person-plus me-1 text-primary"></i> Add New User</h5>
-    <form method="post" class="row g-3">
-      {{ csrf_input() }}
-      <div class="col-md-3">
-        <label class="form-label">Username <span class="required-mark">*</span></label>
-        <div class="input-group">
-          <span class="input-group-text"><i class="bi bi-person"></i></span>
-          <input name="username" class="form-control" placeholder="e.g. jmensah" required>
-        </div>
-      </div>
-      <div class="col-md-3">
-        <label class="form-label">Full Name <span class="required-mark">*</span></label>
-        <div class="input-group">
-          <span class="input-group-text"><i class="bi bi-card-heading"></i></span>
-          <input name="full_name" class="form-control" placeholder="e.g. John Mensah" required>
-        </div>
-      </div>
-      <div class="col-md-3">
-        <label class="form-label">Initial Password <span class="required-mark">*</span></label>
-        <div class="input-group">
-          <span class="input-group-text"><i class="bi bi-lock"></i></span>
-          <input name="password" type="password" class="form-control" placeholder="12+ characters, upper/lowercase, number, symbol" minlength="12" required>
-        </div>
-      </div>
-      <div class="col-md-2">
-        <label class="form-label">System Role <span class="required-mark">*</span></label>
-        <select name="role" class="form-select">
-          {% for role_name in role_permissions.keys()|list %}
-            <option value="{{ role_name }}">{{ role_labels.get(role_name, role_name) }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-md-1 d-flex align-items-end">
-        <button class="btn btn-primary w-100" type="submit"><i class="bi bi-plus-lg"></i> Add</button>
-      </div>
-    </form>
-  </div>
-</div>
+<ul class="nav nav-tabs mb-4" id="userManagementTabs" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" id="users-tab" data-bs-toggle="tab" data-bs-target="#users-panel" type="button" role="tab" aria-controls="users-panel" aria-selected="true">
+      <i class="bi bi-people me-1"></i>Users <span class="badge bg-primary ms-1">{{ rows|length }}</span>
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="roles-tab" data-bs-toggle="tab" data-bs-target="#roles-panel" type="button" role="tab" aria-controls="roles-panel" aria-selected="false">
+      <i class="bi bi-person-gear me-1"></i>Roles &amp; Permissions
+    </button>
+  </li>
+</ul>
 
-<div class="card">
-  <div class="card-body">
-    <div class="panel-title">
-      <h5>Registered Users ({{ rows|length }})</h5>
-      <div class="table-tools mb-0">
-        <input class="form-control form-control-sm" data-table-search="#usersTable" placeholder="Search users...">
+<div class="tab-content" id="userManagementTabContent">
+  <!-- ═══ TAB 1: USERS ═══ -->
+  <div class="tab-pane fade show active" id="users-panel" role="tabpanel" aria-labelledby="users-tab">
+    <div class="card mb-4">
+      <div class="card-body">
+        <h5 class="card-title mb-3"><i class="bi bi-person-plus me-1 text-primary"></i>Add New User</h5>
+        <form method="post" class="row g-3">
+          {{ csrf_input() }}
+          <div class="col-md-3">
+            <label class="form-label">Username <span class="required-mark">*</span></label>
+            <div class="input-group">
+              <span class="input-group-text"><i class="bi bi-person"></i></span>
+              <input name="username" class="form-control" placeholder="e.g. jmensah" required>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Full Name <span class="required-mark">*</span></label>
+            <div class="input-group">
+              <span class="input-group-text"><i class="bi bi-card-heading"></i></span>
+              <input name="full_name" class="form-control" placeholder="e.g. John Mensah" required>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Initial Password <span class="required-mark">*</span></label>
+            <div class="input-group">
+              <span class="input-group-text"><i class="bi bi-lock"></i></span>
+              <input name="password" type="password" class="form-control" placeholder="Min. 8 characters" minlength="8" required>
+            </div>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">System Role <span class="required-mark">*</span></label>
+            <select name="role" class="form-select">
+              {% for role_key, role_label in role_labels.items() %}
+              <option value="{{ role_key }}" {% if role_key == 'STAFF' %}selected{% endif %}>{{ role_label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-1 d-flex align-items-end">
+            <button class="btn btn-primary w-100" type="submit"><i class="bi bi-plus-lg"></i> Add</button>
+          </div>
+        </form>
       </div>
     </div>
-    <div class="table-responsive">
-      <table id="usersTable" class="table table-hover table-sm sortable">
-        <thead>
-          <tr>
-            <th data-sort>User</th>
-            <th data-sort>Full Name</th>
-            <th data-sort>Role</th>
-            <th data-sort>Status</th>
-            <th data-sort>Created Date</th>
-            <th class="text-end">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in rows %}
-          <tr>
-            <td>
-              <div class="d-flex align-items-center gap-2">
-                {% if r.profile_image %}
-                  <img class="avatar avatar-sm" src="{{ url_for('static', filename='images/users/' + r.profile_image) }}" alt="">
-                {% else %}
-                  <span class="avatar avatar-sm avatar-initials">{{ (r.full_name or r.username or 'U')[:1]|upper }}</span>
-                {% endif %}
-                <strong>{{ r.username }}</strong>
+
+    <div class="card">
+      <div class="card-body">
+        <div class="panel-title">
+          <h5>Registered Users ({{ rows|length }})</h5>
+          <div class="table-tools mb-0">
+            <input class="form-control form-control-sm" data-table-search="#usersTable" placeholder="Search users...">
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table id="usersTable" class="table table-hover table-sm sortable">
+            <thead>
+              <tr>
+                <th data-sort>User</th>
+                <th data-sort>Full Name</th>
+                <th data-sort>Role</th>
+                <th data-sort>Status</th>
+                <th data-sort>Created Date</th>
+                <th class="text-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in rows %}
+              <tr>
+                <td>
+                  <div class="d-flex align-items-center gap-2">
+                    {% if r.profile_image %}
+                      <img class="avatar avatar-sm" src="{{ url_for('static', filename='images/users/' + r.profile_image) }}" alt="">
+                    {% else %}
+                      <span class="avatar avatar-sm avatar-initials">{{ (r.full_name or r.username or 'U')[:1]|upper }}</span>
+                    {% endif %}
+                    <strong>{{ r.username }}</strong>
+                  </div>
+                </td>
+                <td>{{ r.full_name }}</td>
+                <td>
+                  <span class="badge bg-{{ role_colors.get(r.role, 'secondary') }} bg-opacity-10 text-{{ role_colors.get(r.role, 'secondary') }} border border-{{ role_colors.get(r.role, 'secondary') }} border-opacity-25 px-2 py-1">
+                    <i class="bi bi-{% if r.role == 'ADMIN' %}shield-check{% elif r.role == 'MANAGER' %}briefcase{% elif r.role == 'SALES_OFFICER' %}cart3{% elif r.role == 'INVENTORY_OFFICER' %}boxes{% elif r.role == 'ACCOUNTANT' %}calculator{% elif r.role == 'VIEWER' %}eye{% else %}person{% endif %} me-1"></i>{{ role_labels.get(r.role, r.role) }}
+                  </span>
+                </td>
+                <td>
+                  {% if r.active %}
+                    <span class="status-badge status-paid"><i class="bi bi-check-circle"></i> ACTIVE</span>
+                  {% else %}
+                    <span class="status-badge status-unpaid"><i class="bi bi-dash-circle"></i> INACTIVE</span>
+                  {% endif %}
+                </td>
+                <td><small class="text-muted">{{ r.created_at|pretty_date if r.created_at else '-' }}</small></td>
+                <td class="text-end">
+                  <a class="btn btn-sm btn-outline-primary" href="{{ url_for('edit_user', user_id=r.id) }}" title="Edit user">
+                    <i class="bi bi-pencil"></i>
+                  </a>
+                  {% if r.username != 'admin' %}
+                    <form class="d-inline" method="post" action="{{ url_for('toggle_user', user_id=r.id) }}" onsubmit="return confirm('Change active status for {{ r.username }}?');">
+                      {{ csrf_input() }}
+                      <button class="btn btn-sm btn-outline-secondary" title="{{ 'Deactivate' if r.active else 'Reactivate' }}">
+                        <i class="bi bi-{{ 'pause-fill' if r.active else 'play-fill' }}"></i>
+                      </button>
+                    </form>
+                    <form class="d-inline" method="post" action="{{ url_for('delete_user', user_id=r.id) }}" onsubmit="return confirm('Permanently delete user {{ r.username }}? This cannot be undone.');">
+                      {{ csrf_input() }}
+                      <button class="btn btn-sm btn-outline-danger" title="Hard delete">
+                        <i class="bi bi-trash3"></i>
+                      </button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ TAB 2: ROLES & PERMISSIONS ═══ -->
+  <div class="tab-pane fade" id="roles-panel" role="tabpanel" aria-labelledby="roles-tab">
+    <span id="roles" class="anchor-target" aria-hidden="true"></span>
+
+    <!-- Role summary cards -->
+    <div class="row g-3 mb-4">
+      {% set role_counts = {} %}
+      {% for r in rows %}
+        {% if r.role in role_counts %}
+          {% if role_counts.update({r.role: role_counts[r.role] + 1}) %}{% endif %}
+        {% else %}
+          {% if role_counts.update({r.role: 1}) %}{% endif %}
+        {% endif %}
+      {% endfor %}
+      {% for role_key, role_label in role_labels.items() %}
+      <div class="col-lg-3 col-md-4 col-sm-6">
+        <div class="card h-100">
+          <div class="card-body text-center py-3">
+            <div class="d-flex align-items-center justify-content-center gap-2 mb-2">
+              <i class="bi bi-{% if role_key == 'ADMIN' %}shield-check text-primary{% elif role_key == 'MANAGER' %}briefcase text-info{% elif role_key == 'SALES_OFFICER' %}cart3 text-success{% elif role_key == 'INVENTORY_OFFICER' %}boxes text-warning{% elif role_key == 'ACCOUNTANT' %}calculator text-dark{% elif role_key == 'VIEWER' %}eye text-secondary{% else %}person text-secondary{% endif %} fs-4"></i>
+              <strong>{{ role_label }}</strong>
+            </div>
+            <div class="big-number">{{ role_counts.get(role_key, 0) }}</div>
+            <small class="text-muted">{{ role_permissions.get(role_key, [])|length }} permissions</small>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- Permission matrix -->
+    <div class="card">
+      <div class="card-body">
+        <div class="panel-title">
+          <div>
+            <h5>Permission Matrix</h5>
+            <span class="text-muted small">Capabilities granted to each system role</span>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover align-middle">
+            <thead>
+              <tr>
+                <th class="bg-light" style="min-width:200px">Permission</th>
+                {% for role_key, role_label in role_labels.items() %}
+                <th class="text-center bg-light" style="min-width:100px">
+                  <small>{{ role_label }}</small>
+                </th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% set all_permissions = [] %}
+              {% for role_key, perms in role_permissions.items() %}
+                {% for p in perms %}
+                  {% if p not in all_permissions %}
+                    {% if all_permissions.append(p) %}{% endif %}
+                  {% endif %}
+                {% endfor %}
+              {% endfor %}
+              {% set perm_groups = {
+                'Dashboard': ['view_dashboard'],
+                'Users': ['view_users', 'create_users', 'edit_users', 'deactivate_users'],
+                'Roles': ['view_roles', 'create_roles', 'edit_roles', 'delete_roles', 'assign_permissions'],
+                'Customers': ['view_customers', 'create_customers', 'edit_customers', 'delete_customers'],
+                'Sales': ['view_sales', 'create_sales', 'edit_sales', 'delete_sales'],
+                'Purchases': ['view_purchases', 'create_purchases', 'edit_purchases', 'delete_purchases'],
+                'Inventory': ['view_inventory', 'manage_inventory'],
+                'Invoices': ['view_invoices', 'create_invoices', 'print_invoices', 'download_invoices'],
+                'Reports': ['view_reports', 'export_reports'],
+                'Payments': ['view_payments', 'manage_payments'],
+                'Profile': ['view_profiles', 'edit_profile']
+              } %}
+              {% for group_name, group_perms in perm_groups.items() %}
+              <tr class="table-light">
+                <td colspan="{{ role_labels|length + 1 }}"><strong class="text-uppercase small">{{ group_name }}</strong></td>
+              </tr>
+              {% for perm in group_perms %}
+              {% if perm in all_permissions %}
+              <tr>
+                <td>
+                  <code class="small">{{ perm.replace('_', ' ').title() }}</code>
+                </td>
+                {% for role_key in role_labels.keys() %}
+                <td class="text-center">
+                  {% if perm in role_permissions.get(role_key, []) %}
+                    <i class="bi bi-check-circle-fill text-success"></i>
+                  {% else %}
+                    <i class="bi bi-dash text-muted"></i>
+                  {% endif %}
+                </td>
+                {% endfor %}
+              </tr>
+              {% endif %}
+              {% endfor %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Users by role breakdown -->
+    <div class="card mt-4">
+      <div class="card-body">
+        <div class="panel-title">
+          <div>
+            <h5>Users by Role</h5>
+            <span class="text-muted small">Current role assignments across the team</span>
+          </div>
+        </div>
+        {% for role_key, role_label in role_labels.items() %}
+        {% set role_users = [] %}
+        {% for r in rows %}{% if r.role == role_key %}{% if role_users.append(r) %}{% endif %}{% endif %}{% endfor %}
+        {% if role_users %}
+        <div class="mb-3">
+          <h6 class="d-flex align-items-center gap-2 mb-2">
+            <span class="badge bg-{{ role_colors.get(role_key, 'secondary') }} bg-opacity-10 text-{{ role_colors.get(role_key, 'secondary') }} border border-{{ role_colors.get(role_key, 'secondary') }} border-opacity-25 px-2 py-1">{{ role_label }}</span>
+            <small class="text-muted">({{ role_users|length }})</small>
+          </h6>
+          <div class="d-flex flex-wrap gap-2">
+            {% for u in role_users %}
+            <div class="d-flex align-items-center gap-2 border rounded-pill px-3 py-1">
+              <span class="avatar avatar-sm avatar-initials">{{ (u.full_name or u.username or 'U')[:1]|upper }}</span>
+              <div>
+                <strong class="small">{{ u.full_name }}</strong>
+                <small class="d-block text-muted">@{{ u.username }}</small>
               </div>
-            </td>
-            <td>{{ r.full_name }}</td>
-            <td>
-              {% if r.role == 'ADMIN' %}
-                <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 px-2 py-1"><i class="bi bi-shield-check me-1"></i>ADMIN</span>
+              {% if u.active %}
+                <span class="badge bg-success bg-opacity-10 text-success fw-bold" style="font-size:0.78rem">Active</span>
               {% else %}
-                <span class="badge bg-secondary bg-opacity-10 text-secondary border px-2 py-1"><i class="bi bi-person me-1"></i>STAFF</span>
+                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold" style="font-size:0.78rem">Inactive</span>
               {% endif %}
-            </td>
-            <td>
-              {% if r.active %}
-                <span class="status-badge status-paid"><i class="bi bi-check-circle"></i> ACTIVE</span>
-              {% else %}
-                <span class="status-badge status-unpaid"><i class="bi bi-dash-circle"></i> INACTIVE</span>
-              {% endif %}
-            </td>
-            <td><small class="text-muted">{{ r.created_at|pretty_date if r.created_at else '-' }}</small></td>
-            <td class="text-end">
-              <a class="btn btn-sm btn-outline-primary" href="{{ url_for('edit_user', user_id=r.id) }}" title="Edit user">
-                <i class="bi bi-pencil"></i>
-              </a>
-              {% if r.username != 'admin' %}
-                <form class="d-inline" method="post" action="{{ url_for('toggle_user', user_id=r.id) }}" onsubmit="return confirm('Change active status for {{ r.username }}?');">
-                  {{ csrf_input() }}
-                  <button class="btn btn-sm btn-outline-secondary" title="{{ 'Deactivate' if r.active else 'Reactivate' }}">
-                    <i class="bi bi-{{ 'pause-fill' if r.active else 'play-fill' }}"></i>
-                  </button>
-                </form>
-                <form class="d-inline" method="post" action="{{ url_for('delete_user', user_id=r.id) }}" onsubmit="return confirm('Permanently delete user {{ r.username }}? This cannot be undone.');">
-                  {{ csrf_input() }}
-                  <button class="btn btn-sm btn-outline-danger" title="Hard delete">
-                    <i class="bi bi-trash3"></i>
-                  </button>
-                </form>
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+        {% endfor %}
+      </div>
     </div>
   </div>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function(){
+  /* Auto-activate the roles tab when URL has #roles */
+  if(location.hash === '#roles'){
+    const tab = document.getElementById('roles-tab');
+    if(tab) new bootstrap.Tab(tab).show();
+  }
+  /* Update hash when tabs are clicked */
+  document.querySelectorAll('#userManagementTabs button[data-bs-toggle="tab"]').forEach(function(btn){
+    btn.addEventListener('shown.bs.tab', function(e){
+      history.replaceState(null, '', e.target.id === 'roles-tab' ? '#roles' : '#users');
+    });
+  });
+})();
+</script>
 {% endblock %}

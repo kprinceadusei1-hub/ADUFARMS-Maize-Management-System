@@ -97,6 +97,16 @@ def create_backup(db_path: str | Path) -> Path:
         finally:
             dst_conn.close()
             src_conn.close()
+    except sqlite3.OperationalError as error:
+        if "locked" in str(error).lower() or "busy" in str(error).lower():
+            if dst.exists():
+                dst.unlink()
+            raise ValueError(
+                "The database is currently in use. Close active sessions and try the backup again."
+            ) from error
+        if dst.exists():
+            dst.unlink()
+        shutil.copy2(src, dst)
     except Exception:
         if dst.exists():
             dst.unlink()
@@ -126,13 +136,37 @@ def safe_restore(db_path: str | Path, backup_name: str) -> Path:
     verify_backup(src)
     dst = Path(db_path)
     # Safety backup before restore (never silently overwrite the only backup)
-    pre = create_backup(dst)
+    try:
+        pre = create_backup(dst)
+    except sqlite3.Error as error:
+        if "locked" in str(error).lower() or "busy" in str(error).lower():
+            raise ValueError(
+                "The database is currently in use. Close active sessions and try the restore again."
+            ) from error
+        raise
     temporary = dst.with_suffix(dst.suffix + ".restore.tmp")
     try:
-        shutil.copy2(src, temporary)
+        source_conn = sqlite3.connect(str(src), timeout=30)
+        temporary_conn = sqlite3.connect(str(temporary), timeout=30)
+        try:
+            source_conn.backup(temporary_conn)
+        finally:
+            temporary_conn.close()
+            source_conn.close()
         verify_database(temporary)
         os.replace(temporary, dst)
+    except PermissionError as error:
+        raise ValueError(
+            "The database is currently in use. Close active sessions and try the restore again."
+        ) from error
+    except sqlite3.OperationalError as error:
+        if "locked" in str(error).lower() or "busy" in str(error).lower():
+            raise ValueError(
+                "The database is currently in use. Close active sessions and try the restore again."
+            ) from error
+        raise
     finally:
         if temporary.exists():
             temporary.unlink()
+    verify_database(dst)
     return pre

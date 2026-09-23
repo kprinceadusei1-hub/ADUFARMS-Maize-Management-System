@@ -7,3 +7,7 @@ env/
 instance/
 *.db
 .vscode/
+
+backups/
+
+backups/

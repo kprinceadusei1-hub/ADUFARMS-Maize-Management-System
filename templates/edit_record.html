@@ -5,6 +5,7 @@
 <div class="card"><div class="card-body">
 {% if kind == 'purchase' %}
 <form method="post" class="row g-3" data-confirm="Are you sure you want to update this purchase?">
+{{ csrf_input() }}
 <div class="col-md-2"><label class="form-label">Date</label><input type="date" name="purchase_date" value="{{record.purchase_date}}" class="form-control" required></div>
 <div class="col-md-3"><label class="form-label">Local Agent</label><input name="local_agent" value="{{record.local_agent}}" class="form-control" required></div>
 <div class="col-md-2"><label class="form-label">Agent Phone</label><input name="agent_phone" value="{{record.agent_phone or ''}}" class="form-control"></div>
@@ -18,6 +19,7 @@
 </form>
 {% elif kind == 'sale' %}
 <form method="post" class="row g-3" data-confirm="Are you sure you want to update this sale?">
+{{ csrf_input() }}
 <div class="col-md-2"><label class="form-label">Date</label><input type="date" name="sale_date" value="{{record.sale_date}}" class="form-control" required></div>
 <div class="col-md-3"><label class="form-label">Customer Name</label><input name="customer_name" value="{{record.customer_name}}" class="form-control" required></div>
 <div class="col-md-2"><label class="form-label">Customer Phone</label><input name="customer_phone" value="{{record.customer_phone or ''}}" class="form-control"></div>
@@ -27,6 +29,7 @@
 </form>
 {% elif kind == 'payment' %}
 <form method="post" class="row g-3" data-confirm="Are you sure you want to update this payment?">
+{{ csrf_input() }}
 <div class="col-md-3"><label class="form-label">Customer Transaction ID <span class="required-mark">*</span></label><input value="{{record.transaction_id}}" class="form-control" disabled></div>
 <div class="col-md-2"><label class="form-label">Payment Date</label><input type="date" name="payment_date" value="{{record.payment_date}}" class="form-control" required></div>
 <div class="col-md-2"><label class="form-label">Amount Paid</label><input type="number" min="0.01" step="0.01" name="amount" value="{{record.amount}}" class="form-control" required></div>
@@ -37,6 +40,7 @@
 </form>
 {% elif kind == 'user' %}
 <form method="post" class="row g-3" data-confirm="Are you sure you want to update this user?">
+{{ csrf_input() }}
 <div class="col-md-3"><label class="form-label">Username</label><input name="username" value="{{record.username}}" class="form-control" required></div>
 <div class="col-md-3"><label class="form-label">Full Name</label><input name="full_name" value="{{record.full_name}}" class="form-control" required></div>
 <div class="col-md-3"><label class="form-label">New Password</label><input name="password" type="password" class="form-control" minlength="12" placeholder="12+ chars; leave blank to keep current"></div>

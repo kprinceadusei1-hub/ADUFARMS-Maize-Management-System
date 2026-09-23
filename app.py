@@ -472,6 +472,14 @@ def valid_date(value, field_name):
         raise ValueError(f"Enter a valid {field_name}.")
 
 
+def normalized_phone(value):
+    return "".join(char for char in str(value or "") if char.isdigit())
+
+
+def normalized_customer_name(value):
+    return " ".join(str(value or "").split()).casefold()
+
+
 def nonnegative_float(name, default=0):
     value = get_float(name, default)
     if value < 0:
@@ -619,6 +627,19 @@ def require_permission(permission_name):
             if "user_id" not in session:
                 return redirect(url_for("login"))
             if not user_has_permission(permission_name):
+                abort(403)
+            return view_func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+def require_any_permission(*permission_names):
+    def decorator(view_func):
+        @wraps(view_func)
+        def wrapper(*args, **kwargs):
+            if "user_id" not in session:
+                return redirect(url_for("login"))
+            if not any(user_has_permission(permission) for permission in permission_names):
                 abort(403)
             return view_func(*args, **kwargs)
         return wrapper
@@ -798,10 +819,10 @@ def ensure_invoice_record(info):
     conn = db()
     try:
         existing = conn.execute(
-            "SELECT invoice_number FROM invoices WHERE transaction_id=?",
+            "SELECT invoice_number,deleted FROM invoices WHERE transaction_id=?",
             (info["transaction_id"],)
         ).fetchone()
-        if existing:
+        if existing and not existing["deleted"]:
             conn.execute("UPDATE sales SET invoice_number=? WHERE transaction_id=?",
                          (existing["invoice_number"], info["transaction_id"]))
             conn.commit()
@@ -809,10 +830,17 @@ def ensure_invoice_record(info):
         sale_date = datetime.strptime(info["sale_date"], "%Y-%m-%d").date()
         invoice_number = next_daily_id("ADU-INV", "invoices", "invoice_number", conn, sale_date)
         timestamp = now()
-        conn.execute("""INSERT INTO invoices(invoice_number,transaction_id,sales_id,invoice_date,generated_by,generated_at)
-                        VALUES(?,?,?,?,?,?)""",
-                     (invoice_number, info["transaction_id"], info["sales_id"], info["sale_date"],
-                      session.get("username", "system"), timestamp))
+        if existing:
+            conn.execute("""UPDATE invoices SET invoice_number=?,sales_id=?,invoice_date=?,generated_by=?,
+                            generated_at=?,deleted=0,deleted_at=NULL,deleted_by=NULL,deletion_reason=NULL
+                            WHERE transaction_id=?""",
+                         (invoice_number, info["sales_id"], info["sale_date"], session.get("username", "system"),
+                          timestamp, info["transaction_id"]))
+        else:
+            conn.execute("""INSERT INTO invoices(invoice_number,transaction_id,sales_id,invoice_date,generated_by,generated_at)
+                            VALUES(?,?,?,?,?,?)""",
+                         (invoice_number, info["transaction_id"], info["sales_id"], info["sale_date"],
+                          session.get("username", "system"), timestamp))
         conn.execute("UPDATE sales SET invoice_number=? WHERE transaction_id=?",
                  (invoice_number, info["transaction_id"]))
         conn.execute("INSERT INTO audit_log(username,action,reference,details,created_at) VALUES(?,?,?,?,?)",
@@ -944,6 +972,7 @@ def delete_record(table, record_id, reference):
         if table == "sales":
             conn.execute("UPDATE invoices SET deleted=1,deleted_at=?,deleted_by=?,deletion_reason=? WHERE transaction_id=?",
                          (ts, by, reason, row["transaction_id"]))
+            conn.execute("UPDATE sales SET invoice_number=NULL WHERE transaction_id=?", (row["transaction_id"],))
         conn.commit()
     except (sqlite3.Error, ValueError):
         conn.rollback()
@@ -1026,11 +1055,11 @@ def sale_info(transaction_id):
     row = conn.execute(f"""
          SELECT s.*, c.name customer_name, c.phone customer_phone,
              c.address customer_address, c.location customer_location,
-             COALESCE(s.invoice_number, (SELECT i.invoice_number FROM invoices i WHERE i.transaction_id=s.transaction_id)) invoice_number,
+            COALESCE(s.invoice_number, (SELECT i.invoice_number FROM invoices i WHERE i.transaction_id=s.transaction_id AND i.deleted=0)) invoice_number,
              COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) total_paid
         FROM sales s JOIN customers c ON c.id=s.customer_id
         WHERE ({visible_sql('s')}) AND (s.transaction_id=? OR s.sales_id=?
-            OR EXISTS (SELECT 1 FROM invoices i WHERE i.transaction_id=s.transaction_id AND i.invoice_number=?)
+            OR EXISTS (SELECT 1 FROM invoices i WHERE i.transaction_id=s.transaction_id AND i.deleted=0 AND i.invoice_number=?)
             OR EXISTS (SELECT 1 FROM payments p WHERE p.transaction_id=s.transaction_id AND (p.payment_id=? OR p.sales_id=?)))
     """, (ref, ref, ref, ref, ref)).fetchone()
     conn.close()
@@ -1210,9 +1239,14 @@ def dashboard():
         COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) > 0
         AND COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) < s.total_sale""").fetchone()["v"]
     unpaid = transactions - paid - part
-    outstanding = max(float(sales) + float(opening_balances) - float(payments), 0)
+    sale_outstanding = conn.execute("""SELECT COALESCE(SUM(CASE WHEN s.total_sale -
+        COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) > 0.005
+        THEN s.total_sale - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0)
+        ELSE 0 END),0) v FROM sales s WHERE s.deleted=0""").fetchone()["v"]
+    outstanding = max(float(opening_balances), 0) + float(sale_outstanding)
     expenses = float(purchase_cost) + float(transport) + float(other)
-    profit = float(sales) - expenses
+    cost_summary = cogs_summary(conn)
+    profit = float(sales) - float(cost_summary["cogs"])
     recent = conn.execute("""SELECT s.sales_id transaction_id,s.sales_id,s.sale_date,c.name,s.quantity_kg,s.total_sale,
         COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) paid
         FROM sales s JOIN customers c ON c.id=s.customer_id WHERE s.deleted=0 ORDER BY s.id DESC LIMIT 8""").fetchall()
@@ -1228,7 +1262,7 @@ def dashboard():
         COALESCE(SUM(s.total_sale),0) + c.opening_balance total_sales,
         COALESCE((SELECT SUM(p.amount) FROM payments p JOIN sales ps ON ps.transaction_id=p.transaction_id
                   WHERE ps.customer_id=c.id AND ps.deleted=0 AND p.deleted=0),0) total_paid
-        FROM customers c JOIN sales s ON s.customer_id=c.id AND s.deleted=0
+        FROM customers c LEFT JOIN sales s ON s.customer_id=c.id AND s.deleted=0
         GROUP BY c.id HAVING total_sales-total_paid > 0.005 ORDER BY total_sales-total_paid DESC LIMIT 8""").fetchall()
     monthly_sales = conn.execute("""SELECT substr(sale_date,1,7) month,COALESCE(SUM(total_sale),0) revenue,
         COALESCE(SUM(quantity_kg),0) quantity FROM sales WHERE deleted=0 GROUP BY month ORDER BY month DESC LIMIT 6""").fetchall()
@@ -1391,7 +1425,7 @@ def sales():
                 sales_id = next_daily_id("ADU-SAL", "sales", "sales_id", conn, sale_day)
                 invoice_id = next_daily_id("ADU-INV", "invoices", "invoice_number", conn, sale_day)
                 stock_svc.assert_stock_available(conn, qty)
-                customer = conn.execute("SELECT id FROM customers WHERE lower(name)=lower(?) AND phone=?", (name,phone)).fetchone()
+                customer = conn.execute("SELECT id FROM customers WHERE lower(trim(name))=lower(trim(?)) AND replace(replace(replace(phone,' ',''),'-',''),'+','')=replace(replace(replace(?,' ',''),'-',''),'+','') AND active=1", (name,phone)).fetchone()
                 if customer:
                     cid = customer["id"]
                 else:
@@ -1412,8 +1446,8 @@ def sales():
                 raise
             finally:
                 conn.close()
-            flash(f"SALE CREATED SUCCESSFULLY. Sales ID: {sales_id}. Invoice No.: {invoice_id}", "success")
-            return redirect(url_for("sales"))
+            flash(f"Sale {sales_id} created and invoice {invoice_id} is ready. Record payment when received.", "success")
+            return redirect(url_for("invoice", transaction_id=sales_id))
         except (ValueError, sqlite3.IntegrityError) as error:
             flash(str(error) if isinstance(error, ValueError) else "The sale could not be saved.", "danger")
     related_purchase = request.args.get("related_purchase", type=int)
@@ -1434,7 +1468,7 @@ def sales():
     rows = conn.execute(f"""SELECT s.*,c.name customer_name,c.phone,
         COALESCE(s.invoice_number, i.invoice_number) invoice_number,
         COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) paid
-        FROM sales s JOIN customers c ON c.id=s.customer_id LEFT JOIN invoices i ON i.transaction_id=s.transaction_id
+        FROM sales s JOIN customers c ON c.id=s.customer_id LEFT JOIN invoices i ON i.transaction_id=s.transaction_id AND i.deleted=0
         WHERE {visible_sql('s')} {sales_filter}
         ORDER BY s.sale_date ASC, s.id ASC LIMIT 100""", sales_params).fetchall()
     conn.close()
@@ -1447,6 +1481,20 @@ def sales():
 @login_required
 @require_permission("view_payments")
 def payments():
+    selected_sales_id = (request.args.get("sales_id") or request.args.get("transaction_id") or "").strip()
+    selected_customer_id = request.args.get("customer_id", type=int)
+    linked_customer_id = None
+    if selected_sales_id:
+        conn = db()
+        linked_customer = conn.execute(
+            """SELECT s.customer_id FROM sales s
+               WHERE (s.sales_id=? OR s.transaction_id=?) AND s.deleted=0""",
+            (selected_sales_id, selected_sales_id)
+        ).fetchone()
+        conn.close()
+        if linked_customer:
+            linked_customer_id = linked_customer["customer_id"]
+            selected_customer_id = linked_customer_id
     if request.method == "POST":
         try:
             sale_ref = (request.form.get("sales_id") or request.form.get("transaction_id") or "").strip()
@@ -1510,7 +1558,10 @@ def payments():
     rows = conn.execute(f"""SELECT p.*, COALESCE(p.sales_id, s.sales_id) AS sales_id, c.name customer_name, c.phone, s.total_sale invoice_amount
         FROM payments p JOIN sales s ON s.transaction_id=p.transaction_id
         JOIN customers c ON c.id=s.customer_id WHERE {visible_sql('p')} AND {visible_sql('s')} ORDER BY p.id DESC LIMIT 100""").fetchall()
-    customers = conn.execute("SELECT id,name,phone FROM customers WHERE active=1 ORDER BY name").fetchall()
+    customers = conn.execute(
+        "SELECT id,name,phone,active FROM customers WHERE active=1 OR id=? ORDER BY active DESC,name",
+        (linked_customer_id or selected_customer_id or -1,)
+    ).fetchall()
     outstanding_sales = conn.execute("""SELECT s.sales_id,s.customer_id,s.sale_date,s.total_sale,c.name customer_name,
         COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) paid
         FROM sales s JOIN customers c ON c.id=s.customer_id
@@ -1519,7 +1570,9 @@ def payments():
         ORDER BY c.name,s.sale_date,s.id""").fetchall()
     conn.close()
     return render_template("payments.html", rows=rows, customers=customers,
-                           outstanding_sales=outstanding_sales, today=date.today().isoformat())
+                           outstanding_sales=outstanding_sales, today=date.today().isoformat(),
+                           selected_customer_id=selected_customer_id,
+                           selected_sales_id=selected_sales_id)
 
 
 @app.route("/purchases/<int:purchase_id>/edit", methods=["GET", "POST"])
@@ -1547,7 +1600,7 @@ def edit_purchase(purchase_id):
             conn = db()
             try:
                 conn.execute("BEGIN IMMEDIATE")
-                current = conn.execute("SELECT * FROM purchases WHERE id=?", (purchase_id,)).fetchone()
+                current = conn.execute("SELECT * FROM purchases WHERE id=? AND deleted=0", (purchase_id,)).fetchone()
                 if not current:
                     raise ValueError("This transaction is unavailable.")
                 old_received = float(current["quantity_received_kg"])
@@ -1606,12 +1659,12 @@ def edit_sale(sale_id):
             conn = db()
             try:
                 conn.execute("BEGIN IMMEDIATE")
-                current = conn.execute("SELECT * FROM sales WHERE id=?", (sale_id,)).fetchone()
+                current = conn.execute("SELECT * FROM sales WHERE id=? AND deleted=0", (sale_id,)).fetchone()
                 if not current:
                     raise ValueError("This transaction is unavailable.")
                 old_qty = float(current["quantity_kg"])
                 stock_svc.apply_sale_edit(conn, current["transaction_id"], old_qty, qty, sale_date, by, ts)
-                customer = conn.execute("SELECT id FROM customers WHERE lower(name)=lower(?) AND phone=?", (name, phone)).fetchone()
+                customer = conn.execute("SELECT id FROM customers WHERE lower(trim(name))=lower(trim(?)) AND replace(replace(replace(phone,' ',''),'-',''),'+','')=replace(replace(replace(?,' ',''),'-',''),'+','') AND active=1", (name, phone)).fetchone()
                 cid = customer["id"] if customer else conn.execute(
                     "INSERT INTO customers(name,phone,created_at) VALUES(?,?,?)", (name, phone, ts)
                 ).lastrowid
@@ -1653,6 +1706,9 @@ def edit_payment(payment_id):
             conn = db()
             try:
                 conn.execute("BEGIN IMMEDIATE")
+                current = conn.execute("SELECT * FROM payments WHERE id=? AND deleted=0", (payment_id,)).fetchone()
+                if not current:
+                    raise ValueError("This payment is reversed or unavailable.")
                 other_paid = conn.execute("SELECT COALESCE(SUM(amount),0) v FROM payments WHERE transaction_id=? AND id!=? AND deleted=0",
                                           (row["transaction_id"], payment_id)).fetchone()["v"]
                 if amount + float(other_paid) > float(row["total_sale"]) + 0.005:
@@ -1684,14 +1740,23 @@ def customers():
         conn = None
         try:
             name = request.form.get("name", "").strip()
+            phone = request.form.get("phone", "").strip()
             opening_balance = nonnegative_float("opening_balance")
             if not name:
                 raise ValueError("Customer name is required.")
             conn = db()
+            existing_customers = conn.execute(
+                "SELECT id,name,phone FROM customers WHERE active=1"
+            ).fetchall()
+            duplicate = next((row for row in existing_customers
+                              if normalized_customer_name(row["name"]) == normalized_customer_name(name)
+                              and normalized_phone(row["phone"]) == normalized_phone(phone)), None)
+            if duplicate:
+                raise ValueError(f"This customer already exists: {duplicate['name']} ({duplicate['phone'] or 'no phone'}).")
             customer_cursor = conn.execute("""INSERT INTO customers
                 (name,phone,address,location,customer_type,opening_balance,notes,created_at)
                 VALUES(?,?,?,?,?,?,?,?)""", (
-                    name, request.form.get("phone", "").strip(),
+                    name, phone,
                     request.form.get("address", "").strip(), request.form.get("location", "").strip(),
                     request.form.get("customer_type", "RETAIL"), opening_balance,
                     request.form.get("notes", "").strip(), now()))
@@ -1721,6 +1786,7 @@ def customers():
 
 @app.route("/customers/<int:customer_id>")
 @login_required
+@require_permission("view_customers")
 def customer_statement(customer_id):
     conn = db()
     customer = conn.execute("SELECT * FROM customers WHERE id=? AND active=1", (customer_id,)).fetchone()
@@ -1729,7 +1795,7 @@ def customer_statement(customer_id):
         abort(404)
     sales_rows = conn.execute("""SELECT s.*, i.invoice_number, COALESCE((SELECT SUM(p.amount) FROM payments p
         WHERE p.transaction_id=s.transaction_id AND p.deleted=0), 0) paid
-        FROM sales s LEFT JOIN invoices i ON i.transaction_id=s.transaction_id
+        FROM sales s LEFT JOIN invoices i ON i.transaction_id=s.transaction_id AND i.deleted=0
         WHERE s.customer_id=? AND s.deleted=0 ORDER BY s.sale_date DESC, s.id DESC""", (customer_id,)).fetchall()
     conn.close()
     total_sales = sum(float(row["total_sale"]) for row in sales_rows) + float(customer["opening_balance"] or 0)
@@ -1788,8 +1854,11 @@ def delete_customer(customer_id):
             raise ValueError("A reason for deletion is required.")
         ts = now()
         conn.execute("BEGIN IMMEDIATE")
-        sales = conn.execute("SELECT transaction_id FROM sales WHERE customer_id=? AND deleted=0", (customer_id,)).fetchall()
+        sales = conn.execute("SELECT transaction_id,quantity_kg,sale_date FROM sales WHERE customer_id=? AND deleted=0", (customer_id,)).fetchall()
         transaction_ids = [row["transaction_id"] for row in sales]
+        for sale in sales:
+            stock_svc.apply_reversal(conn, "sales", sale["transaction_id"], float(sale["quantity_kg"]),
+                                      sale["sale_date"], session["username"], ts, reason)
         conn.execute("UPDATE customers SET active=0,deleted_at=?,deleted_by=?,deletion_reason=? WHERE id=?",
                      (ts, session["username"], reason, customer_id))
         conn.execute("UPDATE sales SET deleted=1,deleted_at=?,deleted_by=?,deletion_reason=? WHERE customer_id=? AND deleted=0",
@@ -1857,10 +1926,15 @@ def restore_customer(customer_id):
         deletion_timestamp = customer["deleted_at"]
         conn.execute("BEGIN IMMEDIATE")
         conn.execute("UPDATE customers SET active=1,deleted_at=NULL,deleted_by=NULL,deletion_reason=NULL WHERE id=?", (customer_id,))
+        deleted_sales = conn.execute("SELECT transaction_id,quantity_kg,sale_date FROM sales WHERE customer_id=? AND deleted=1 AND deleted_at=?",
+                                     (customer_id, deletion_timestamp)).fetchall()
+        for sale in deleted_sales:
+            stock_svc.apply_restoration(conn, "sales", sale["transaction_id"], float(sale["quantity_kg"]),
+                                        sale["sale_date"], session["username"], ts)
         conn.execute("UPDATE sales SET deleted=0,deleted_at=NULL,deleted_by=NULL,deletion_reason=NULL WHERE customer_id=? AND deleted=1 AND deleted_at=?",
                      (customer_id, deletion_timestamp))
         conn.execute("""UPDATE payments SET deleted=0,deleted_at=NULL,deleted_by=NULL,deletion_reason=NULL
-                       WHERE deleted=1 AND deleted_at=? AND transaction_id IN (SELECT transaction_id FROM sales WHERE customer_id=?)""",
+                       WHERE deleted=1 AND deleted_at=? AND transaction_id IN (SELECT transaction_id FROM sales WHERE customer_id=? AND deleted=0)""",
                      (deletion_timestamp, customer_id))
         conn.execute("""UPDATE invoices SET deleted=0,deleted_at=NULL,deleted_by=NULL,deletion_reason=NULL
                        WHERE deleted=1 AND deleted_at=? AND transaction_id IN (SELECT transaction_id FROM sales WHERE customer_id=?)""",
@@ -2027,8 +2101,10 @@ def restore_record(table, record_id):
         stock_svc.apply_restoration(conn, table, reference, qty, movement_date, by, ts)
         conn.execute(f"UPDATE {table} SET deleted=0,deleted_at=NULL,deleted_by=NULL,deletion_reason=NULL WHERE id=?", (record_id,))
         if table == "sales":
-            conn.execute("UPDATE payments SET deleted=0,deleted_at=NULL,deleted_by=NULL,deletion_reason=NULL WHERE transaction_id=?", (row["transaction_id"],))
-            conn.execute("UPDATE invoices SET deleted=0,deleted_at=NULL,deleted_by=NULL,deletion_reason=NULL WHERE transaction_id=?", (row["transaction_id"],))
+            conn.execute("UPDATE payments SET deleted=0,deleted_at=NULL,deleted_by=NULL,deletion_reason=NULL WHERE transaction_id=? AND deleted=1 AND deleted_at=?",
+                         (row["transaction_id"], row["deleted_at"]))
+            conn.execute("UPDATE invoices SET deleted=0,deleted_at=NULL,deleted_by=NULL,deletion_reason=NULL WHERE transaction_id=? AND deleted=1 AND deleted_at=?",
+                         (row["transaction_id"], row["deleted_at"]))
         spec_action = SPEC_RESTORE.get(table, "TRANSACTION RESTORED")
         conn.execute("INSERT INTO audit_log(username,action,reference,details,created_at) VALUES(?,?,?,?,?)",
                      (actor_label(), spec_action, reference, f"type={table}; restored_by={by}", ts))
@@ -2113,7 +2189,7 @@ def invoice(transaction_id=None):
                  WHEN s.total_sale - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) <= 0.005 THEN 'PAID'
                  WHEN COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) > 0 THEN 'PART PAYMENT'
                  ELSE 'UNPAID' END status
-            FROM sales s JOIN customers c ON c.id=s.customer_id LEFT JOIN invoices i ON i.transaction_id=s.transaction_id
+            FROM sales s JOIN customers c ON c.id=s.customer_id LEFT JOIN invoices i ON i.transaction_id=s.transaction_id AND i.deleted=0
             WHERE {' AND '.join(conditions)} ORDER BY s.sale_date DESC,s.id DESC LIMIT 50""", params).fetchall()
         conn.close()
         if not info and len(invoice_matches) == 1:
@@ -2131,7 +2207,7 @@ def invoice(transaction_id=None):
              WHEN s.total_sale - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) <= 0.005 THEN 'PAID'
              WHEN COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) > 0 THEN 'PART PAYMENT'
              ELSE 'UNPAID' END status
-        FROM sales s JOIN customers c ON c.id=s.customer_id LEFT JOIN invoices i ON i.transaction_id=s.transaction_id
+        FROM sales s JOIN customers c ON c.id=s.customer_id LEFT JOIN invoices i ON i.transaction_id=s.transaction_id AND i.deleted=0
         WHERE s.deleted=0 ORDER BY s.sale_date DESC,s.id DESC LIMIT 20""").fetchall()
     conn.close()
     print_view = request.path.rstrip("/").endswith("/print") or request.args.get("print") in {"1", "true", "yes"}
@@ -2144,6 +2220,7 @@ def invoice(transaction_id=None):
 
 
 @app.route("/invoice/<transaction_id>/pdf")
+@app.route("/invoices/<transaction_id>/pdf")
 @login_required
 @require_permission("view_invoices")
 def invoice_pdf(transaction_id):
@@ -2260,6 +2337,7 @@ def invoice_pdf(transaction_id):
 
 @app.route("/search")
 @login_required
+@require_any_permission("view_customers", "view_sales", "view_purchases", "view_payments")
 def search():
     q = request.args.get("q","").strip()
     results=[]
@@ -2268,7 +2346,7 @@ def search():
         results=conn.execute(f"""SELECT s.transaction_id,s.sales_id,i.invoice_number,s.sale_date,c.name customer_name,c.phone,
             s.quantity_kg,s.selling_price_kg,s.total_sale,
             COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) paid
-            FROM sales s JOIN customers c ON c.id=s.customer_id LEFT JOIN invoices i ON i.transaction_id=s.transaction_id
+            FROM sales s JOIN customers c ON c.id=s.customer_id LEFT JOIN invoices i ON i.transaction_id=s.transaction_id AND i.deleted=0
             WHERE ({visible_sql('s')}) AND (s.sales_id LIKE ? OR s.transaction_id LIKE ? OR i.invoice_number LIKE ?
                 OR c.name LIKE ? OR c.phone LIKE ? OR s.sale_date LIKE ?
                 OR EXISTS (SELECT 1 FROM payments sp WHERE sp.transaction_id=s.transaction_id AND sp.payment_id LIKE ?))
@@ -2341,9 +2419,13 @@ def reports():
     sales_total = sum(float(r["total_sale"]) for r in sales_rows)
     purchase_cost_total = sum(float(r["total_cost"]) for r in purchase_rows)
     expenses_total = conn.execute(f"SELECT COALESCE(SUM(total_purchase_cost),0)+COALESCE(SUM(transport_cost),0)+COALESCE(SUM(other_expenses),0) v FROM purchases WHERE deleted=0 {purchase_filter}", purchase_params).fetchone()["v"]
-    profit_est = float(sales_total) - float(expenses_total)
+    period_received = float(purchased or 0)
+    period_unit_cost = float(purchase_cost_total) / period_received if period_received > 0 else 0
+    period_cogs = float(sold or 0) * period_unit_cost
+    profit_est = float(sales_total) - period_cogs
+    customer_count = conn.execute("SELECT COUNT(DISTINCT customer_id) v FROM sales WHERE deleted=0" + date_filter.replace("sale_date", "sale_date"), params).fetchone()["v"]
     counts = dict(sales=len(sales_rows), purchases=len(purchase_rows),
-                  payments=len(payment_rows), customers=len(balance_rows))
+                  payments=len(payment_rows), customers=int(customer_count))
     conn.close()
     summary = dict(stock_kg=stock_kg, sales_total=sales_total, purchase_cost_total=purchase_cost_total,
                    payment_total=float(payment_total), expenses_total=float(expenses_total),
@@ -2386,6 +2468,7 @@ def reports():
 
 @app.route("/search/transaction/<transaction_id>")
 @login_required
+@require_permission("view_sales")
 def transaction_history(transaction_id):
     info=sale_info(transaction_id)
     if not info: abort(404)
@@ -2574,7 +2657,7 @@ def toggle_user(user_id):
 @login_required
 @admin_required
 def admin_gallery():
-    return render_template("error.html", code=403, message="Gallery access is restricted to administrators."), 403
+    return redirect(url_for("dashboard") + "#dashboard-imagery")
 
 
 @app.route("/admin/audit-logs")
@@ -2802,6 +2885,7 @@ def method_not_allowed(error):
 
 @app.errorhandler(500)
 def server_error(error):
+    app.logger.exception("500 Internal Server Error: %s", error)
     return render_template("error.html", code=500, message="Something went wrong while processing your request."), 500
 
 

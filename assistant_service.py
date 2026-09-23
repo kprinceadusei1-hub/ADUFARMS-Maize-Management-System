@@ -70,15 +70,18 @@ def answer_question(conn, question: str) -> dict:
     # Profit / Financial Position / Revenue
     if "profit" in text or "revenue" in text or "expense" in text or "financial" in text:
         sales_val = conn.execute("SELECT COALESCE(SUM(total_sale),0) FROM sales WHERE deleted=0").fetchone()[0]
-        cost_val = conn.execute("SELECT COALESCE(SUM(total_cost),0) FROM purchases WHERE deleted=0").fetchone()[0]
+        purchase_data = conn.execute("SELECT COALESCE(SUM(quantity_received_kg),0), COALESCE(SUM(total_cost),0) FROM purchases WHERE deleted=0").fetchone()
+        sold_qty = conn.execute("SELECT COALESCE(SUM(quantity_kg),0) FROM sales WHERE deleted=0").fetchone()[0]
+        received_qty, acquisition_cost = float(purchase_data[0]), float(purchase_data[1])
+        cost_val = float(sold_qty) * (acquisition_cost / received_qty if received_qty > 0 else 0)
         paid_val = conn.execute("SELECT COALESCE(SUM(amount),0) FROM payments WHERE deleted=0").fetchone()[0]
         gross_profit = float(sales_val) - float(cost_val)
         return {
             "title": "Financial Performance Overview",
-            "answer": f"Total sales revenue is {_money(sales_val)} with total acquisition expenses of {_money(cost_val)}, resulting in an estimated gross profit of {_money(gross_profit)}.",
+            "answer": f"Total sales revenue is {_money(sales_val)} with estimated cost of goods sold of {_money(cost_val)}, resulting in an estimated gross profit of {_money(gross_profit)}.",
             "facts": [
                 f"Gross Sales Revenue: {_money(sales_val)}",
-                f"Total Procurement Expenses: {_money(cost_val)}",
+                f"Estimated Cost of Goods Sold: {_money(cost_val)}",
                 f"Payments Collected: {_money(paid_val)}",
                 f"Estimated Gross Margin: {_money(gross_profit)}"
             ]

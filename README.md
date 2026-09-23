@@ -65,7 +65,7 @@ The AI Assistant is local and database-backed. It does not call an external prov
 ## Database
 The SQLite database `adufarms.db` is created automatically on first run.
 
-Administrator backup and restore actions create integrity-checked SQLite snapshots. Restore first creates a safety backup and replaces the database atomically. Keep the `backups` directory on a separate protected drive for disaster recovery.
+Administrator backup and restore actions create integrity-checked SQLite snapshots. Restore first creates a safety backup, verifies a temporary restore image, and replaces the database atomically. Restores must be performed when no other application session is actively using the database; if Windows reports the database is locked, the restore is cancelled without changing live data. Keep the `backups` directory on a separate protected drive for disaster recovery.
 
 For automatic protection, configure a second drive or synchronized protected folder and run the scheduled backup command daily:
 
