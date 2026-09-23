@@ -447,6 +447,9 @@ def add_security_headers(response):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+    response.headers["Origin-Agent-Cluster"] = "?1"
     if request.endpoint != "static":
         response.headers.setdefault("Cache-Control", "no-store, max-age=0")
     response.headers["Content-Security-Policy"] = (
@@ -1111,6 +1114,102 @@ def pretty_date(v):
     return stamp
 
 
+CUSTOMER_COLOR_THEMES = [
+    "emerald", "cobalt", "amber", "amethyst",
+    "teal", "terracotta", "slate", "ruby"
+]
+
+@app.template_filter("customer_theme")
+def customer_theme_filter(val):
+    if not val:
+        return "customer-theme-slate"
+    text = str(val).strip()
+    idx = sum(ord(c) for c in text) % len(CUSTOMER_COLOR_THEMES)
+    return f"customer-theme-{CUSTOMER_COLOR_THEMES[idx]}"
+
+@app.template_filter("customer_initials")
+def customer_initials_filter(val):
+    if not val:
+        return "C"
+    parts = [p.strip() for p in str(val).split() if p.strip()]
+    if not parts:
+        return "C"
+    if len(parts) == 1:
+        return parts[0][:2].upper()
+    return (parts[0][0] + parts[1][0]).upper()
+
+@app.template_filter("customer_type_badge")
+def customer_type_badge_filter(val):
+    ctype = str(val or "RETAIL").strip().upper()
+    if ctype == "WHOLESALE":
+        return Markup('<span class="badge-customer-type badge-type-wholesale"><i class="bi bi-building"></i> WHOLESALE</span>')
+    elif ctype == "INSTITUTION":
+        return Markup('<span class="badge-customer-type badge-type-institution"><i class="bi bi-bank"></i> INSTITUTION</span>')
+    elif ctype == "RETAIL":
+        return Markup('<span class="badge-customer-type badge-type-retail"><i class="bi bi-shop"></i> RETAIL</span>')
+    return Markup(f'<span class="badge-customer-type badge-type-other"><i class="bi bi-person"></i> {ctype}</span>')
+
+@app.template_filter("customer_balance_badge")
+def customer_balance_badge_filter(balance):
+    try:
+        bal = float(balance or 0)
+    except (ValueError, TypeError):
+        bal = 0.0
+    if bal <= 0.005:
+        return Markup('<span class="badge-balance badge-balance-cleared"><i class="bi bi-check-circle-fill"></i> CLEARED</span>')
+    elif bal < 5000:
+        return Markup(f'<span class="badge-balance badge-balance-owing"><i class="bi bi-clock-history"></i> OWING {money(bal)}</span>')
+    else:
+        return Markup(f'<span class="badge-balance badge-balance-high"><i class="bi bi-exclamation-triangle-fill"></i> HIGH DEBT {money(bal)}</span>')
+
+
+# Enterprise Security: In-Memory IP Login Rate Limiter & Magic Byte Validator
+_LOGIN_IP_ATTEMPTS = {}
+
+def is_ip_login_rate_limited(ip_addr, max_attempts=8, window_seconds=600):
+    if not ip_addr:
+        return False
+    now_ts = datetime.now().timestamp()
+    attempts = [ts for ts in _LOGIN_IP_ATTEMPTS.get(ip_addr, []) if now_ts - ts < window_seconds]
+    _LOGIN_IP_ATTEMPTS[ip_addr] = attempts
+    return len(attempts) >= max_attempts
+
+def record_ip_login_attempt(ip_addr):
+    if not ip_addr:
+        return
+    now_ts = datetime.now().timestamp()
+    attempts = [ts for ts in _LOGIN_IP_ATTEMPTS.get(ip_addr, []) if now_ts - ts < 600]
+    attempts.append(now_ts)
+    _LOGIN_IP_ATTEMPTS[ip_addr] = attempts
+
+def clear_ip_login_attempts(ip_addr):
+    if ip_addr in _LOGIN_IP_ATTEMPTS:
+        _LOGIN_IP_ATTEMPTS.pop(ip_addr, None)
+
+def is_valid_image_bytes(stream):
+    """Deep inspect magic bytes of an uploaded image stream to prevent polyglot or disguised executable uploads."""
+    if stream is None:
+        return False
+    try:
+        pos = stream.tell()
+        header = stream.read(16)
+        stream.seek(pos)
+        if len(header) < 4:
+            return False
+        # JPEG: \xff\xd8\xff
+        if header.startswith(b"\xff\xd8\xff"):
+            return True
+        # PNG: \x89PNG\r\n\x1a\n
+        if header.startswith(b"\x89PNG\r\n\x1a\n"):
+            return True
+        # WEBP: starts with RIFF and has WEBP at offset 8
+        if len(header) >= 12 and header.startswith(b"RIFF") and header[8:12] == b"WEBP":
+            return True
+        return False
+    except Exception:
+        return False
+
+
 @app.route("/")
 def index():
     return redirect(url_for("dashboard") if "user_id" in session else url_for("login"))
@@ -1119,12 +1218,17 @@ def index():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
+        client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "127.0.0.1").split(",")[0].strip()
+        if is_ip_login_rate_limited(client_ip):
+            log_action("SECURITY RATE LIMIT", "SYSTEM", f"ip={client_ip}; login attempts exceeded threshold")
+            abort(429, description="Too many failed sign-in attempts from your network. Please wait 10 minutes and try again.")
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         conn = db()
         user = conn.execute("SELECT * FROM users WHERE username=? AND active=1", (username,)).fetchone()
         locked = bool(user and user["locked_until"] and user["locked_until"] > now())
         if user and not locked and check_password_hash(user["password_hash"], password):
+            clear_ip_login_attempts(client_ip)
             conn.execute("UPDATE users SET last_login=?,failed_login_attempts=0,locked_until=NULL WHERE id=?", (now(), user["id"]))
             conn.commit()
             conn.close()
@@ -1134,17 +1238,21 @@ def login():
             session["username"] = user["username"]
             session["full_name"] = user["full_name"]
             session["role"] = user["role"]
-            log_action("LOGIN", username, f"user_id={user['id']}; role={user['role']}")
+            session["csrf_token"] = secrets.token_urlsafe(32)
+            log_action("LOGIN SUCCESS", username, f"user_id={user['id']}; ip={client_ip}; role={user['role']}")
             return redirect(url_for("dashboard"))
+        record_ip_login_attempt(client_ip)
         if user and not locked:
             attempts = int(user["failed_login_attempts"] or 0) + 1
             lock_until = None
             if attempts >= 5:
                 lock_until = (datetime.now() + timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S")
                 attempts = 0
-                log_action("LOGIN LOCKED", username, "Too many failed sign-in attempts; locked for 15 minutes.")
+                log_action("LOGIN LOCKED", username, f"Too many failed sign-in attempts; locked for 15 minutes; ip={client_ip}")
             conn.execute("UPDATE users SET failed_login_attempts=?,locked_until=? WHERE id=?", (attempts, lock_until, user["id"]))
             conn.commit()
+        else:
+            log_action("LOGIN FAILED", username or "unknown", f"ip={client_ip}; invalid credentials or inactive account")
         conn.close()
         flash("Invalid credentials or account temporarily unavailable.", "danger")
     return render_template("login.html")
@@ -1319,9 +1427,9 @@ def update_dashboard_image():
         flash("Select a JPG, PNG, or WEBP image first.", "danger")
         return redirect(url_for("dashboard") + "#dashboard-imagery")
     extension = Path(image.filename).suffix.lower()
-    if extension not in ALLOWED_PROFILE_EXTS or image.mimetype not in ALLOWED_PROFILE_MIMES:
+    if extension not in ALLOWED_PROFILE_EXTS or image.mimetype not in ALLOWED_PROFILE_MIMES or not is_valid_image_bytes(image.stream):
         conn.close()
-        flash("Dashboard images must be JPG, PNG, or WEBP.", "danger")
+        flash("Invalid or corrupted image file. Please upload a genuine JPG, PNG, or WEBP file.", "danger")
         return redirect(url_for("dashboard") + "#dashboard-imagery")
     filename = secure_filename(f"dashboard-{slot}-{secrets.token_hex(8)}{extension}")
     relative_filename = f"images/dashboard/custom/{filename}"
@@ -1409,6 +1517,7 @@ def sales():
             price = nonnegative_float("selling_price_kg")
             if qty <= 0 or price < 0:
                 raise ValueError("Enter valid quantity and selling price.")
+            customer_id_form = request.form.get("customer_id", type=int)
             name = request.form["customer_name"].strip()
             phone = request.form.get("customer_phone","").strip()
             if not name:
@@ -1425,10 +1534,27 @@ def sales():
                 sales_id = next_daily_id("ADU-SAL", "sales", "sales_id", conn, sale_day)
                 invoice_id = next_daily_id("ADU-INV", "invoices", "invoice_number", conn, sale_day)
                 stock_svc.assert_stock_available(conn, qty)
-                customer = conn.execute("SELECT id FROM customers WHERE lower(trim(name))=lower(trim(?)) AND replace(replace(replace(phone,' ',''),'-',''),'+','')=replace(replace(replace(?,' ',''),'-',''),'+','') AND active=1", (name,phone)).fetchone()
-                if customer:
-                    cid = customer["id"]
-                else:
+                cid = None
+                if customer_id_form:
+                    c_row = conn.execute("SELECT id, name FROM customers WHERE id=? AND active=1", (customer_id_form,)).fetchone()
+                    if c_row:
+                        cid = c_row["id"]
+                if not cid and phone:
+                    clean_p = normalized_phone(phone)
+                    if clean_p:
+                        all_c = conn.execute("SELECT id, phone, name FROM customers WHERE active=1").fetchall()
+                        p_match = next((c for c in all_c if normalized_phone(c["phone"]) == clean_p), None)
+                        if p_match:
+                            cid = p_match["id"]
+                if not cid and name:
+                    norm_n = normalized_customer_name(name)
+                    tokens = set(norm_n.split())
+                    all_c = conn.execute("SELECT id, phone, name FROM customers WHERE active=1").fetchall()
+                    n_match = next((c for c in all_c if normalized_customer_name(c["name"]) == norm_n
+                                    or (len(tokens) > 1 and set(normalized_customer_name(c["name"]).split()) == tokens)), None)
+                    if n_match:
+                        cid = n_match["id"]
+                if not cid:
                     cur = conn.execute("INSERT INTO customers(name,phone,created_at) VALUES(?,?,?)", (name,phone,ts))
                     cid = cur.lastrowid
                 conn.execute("""INSERT INTO sales(transaction_id,sales_id,invoice_number,sale_date,customer_id,quantity_kg,selling_price_kg,total_sale,staff_user,created_at)
@@ -1453,7 +1579,13 @@ def sales():
     related_purchase = request.args.get("related_purchase", type=int)
     selected_customer = request.args.get("customer_id", type=int)
     conn = db()
-    selected_customer_row = conn.execute("SELECT id,name,phone FROM customers WHERE id=? AND active=1", (selected_customer,)).fetchone() if selected_customer else None
+    selected_customer_row = conn.execute(
+        "SELECT id,name,phone,location,address,customer_type FROM customers WHERE id=? AND active=1",
+        (selected_customer,)
+    ).fetchone() if selected_customer else None
+    all_customers = conn.execute(
+        "SELECT id,name,phone,location,address,customer_type FROM customers WHERE active=1 ORDER BY name ASC"
+    ).fetchall()
     related_purchase_row = None
     sales_filter = ""
     sales_params = []
@@ -1474,7 +1606,8 @@ def sales():
     conn.close()
     _, _, stock = stock_summary()
     return render_template("sales.html", rows=rows, stock=stock, today=date.today().isoformat(),
-                           related_purchase=related_purchase_row, selected_customer=selected_customer_row)
+                           related_purchase=related_purchase_row, selected_customer=selected_customer_row,
+                           customers=all_customers)
 
 
 @app.route("/payments", methods=["GET","POST"])
@@ -1569,10 +1702,25 @@ def payments():
             WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) > 0.005
         ORDER BY c.name,s.sale_date,s.id""").fetchall()
     conn.close()
+    total_collected = sum(float(r["amount"]) for r in rows if not r["deleted"])
+    momo_collected = sum(float(r["amount"]) for r in rows if not r["deleted"] and 'mobile' in (r["payment_method"] or '').lower())
+    cash_collected = sum(float(r["amount"]) for r in rows if not r["deleted"] and 'cash' in (r["payment_method"] or '').lower())
+    bank_collected = sum(float(r["amount"]) for r in rows if not r["deleted"] and 'bank' in (r["payment_method"] or '').lower())
+    total_outstanding = sum(max(float(s["total_sale"]) - float(s["paid"]), 0) for s in outstanding_sales)
+    payment_metrics = {
+        "total_collected": total_collected,
+        "momo_collected": momo_collected,
+        "cash_collected": cash_collected,
+        "bank_collected": bank_collected,
+        "total_outstanding": total_outstanding,
+        "count": len([r for r in rows if not r["deleted"]])
+    }
     return render_template("payments.html", rows=rows, customers=customers,
                            outstanding_sales=outstanding_sales, today=date.today().isoformat(),
                            selected_customer_id=selected_customer_id,
                            selected_sales_id=selected_sales_id)
+                           selected_sales_id=selected_sales_id,
+                           metrics=payment_metrics)
 
 
 @app.route("/purchases/<int:purchase_id>/edit", methods=["GET", "POST"])
@@ -1749,10 +1897,12 @@ def customers():
                 "SELECT id,name,phone FROM customers WHERE active=1"
             ).fetchall()
             duplicate = next((row for row in existing_customers
-                              if normalized_customer_name(row["name"]) == normalized_customer_name(name)
-                              and normalized_phone(row["phone"]) == normalized_phone(phone)), None)
+                              if (normalized_phone(row["phone"]) and normalized_phone(row["phone"]) == normalized_phone(phone))
+                              or (normalized_customer_name(row["name"]) == normalized_customer_name(name) and normalized_phone(row["phone"]) == normalized_phone(phone))), None)
             if duplicate:
-                raise ValueError(f"This customer already exists: {duplicate['name']} ({duplicate['phone'] or 'no phone'}).")
+                conn.close()
+                flash(f"Customer '{duplicate['name']}' ({duplicate['phone'] or 'no phone'}) is already registered. Proceeding directly to sales.", "info")
+                return redirect(url_for("sales", customer_id=duplicate["id"]))
             customer_cursor = conn.execute("""INSERT INTO customers
                 (name,phone,address,location,customer_type,opening_balance,notes,created_at)
                 VALUES(?,?,?,?,?,?,?,?)""", (
@@ -2505,8 +2655,8 @@ def profile():
             image = request.files.get("profile_image")
             if image and image.filename:
                 extension = Path(image.filename).suffix.lower()
-                if extension not in ALLOWED_PROFILE_EXTS or image.mimetype not in ALLOWED_PROFILE_MIMES:
-                    flash("Profile image must be JPG, PNG, or WEBP.", "danger")
+                if extension not in ALLOWED_PROFILE_EXTS or image.mimetype not in ALLOWED_PROFILE_MIMES or not is_valid_image_bytes(image.stream):
+                    flash("Profile image must be a genuine JPG, PNG, or WEBP file.", "danger")
                     conn.close()
                     return render_template("profile.html", user=user)
                 if request.content_length and request.content_length > app.config["MAX_CONTENT_LENGTH"]:
@@ -2894,3 +3044,4 @@ if __name__ == "__main__":
     app.run(debug=os.environ.get("ADUFARMS_DEBUG", "0") == "1", use_reloader=False,
             host=os.environ.get("ADUFARMS_HOST", "127.0.0.1"),
             port=int(os.environ.get("ADUFARMS_PORT", "5000")))
+

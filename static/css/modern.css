@@ -1,3 +1,4 @@
+
 :root {
   --app-bg: #f0f4f1;
   --panel: #ffffff;
@@ -682,3 +683,52 @@ body.sidebar-collapsed .sidebar-profile-panel { left:calc(100% + 8px); right:aut
   body.sidebar-collapsed .sidebar-nav a { justify-content:flex-start; gap:12px; padding-left:11px; padding-right:11px; }
   body.sidebar-collapsed .sidebar-profile-card { justify-content:flex-start; padding-left:9px; padding-right:9px; }
 }
+
+/* Customer Color Coding & Identification */
+.customer-chip { display:inline-flex; align-items:center; gap:8px; vertical-align:middle; text-decoration:none; color:inherit; }
+.customer-avatar { width:30px; height:30px; min-width:30px; border-radius:50%; display:inline-grid; place-items:center; font-family:'Space Grotesk',sans-serif; font-size:.76rem; font-weight:800; border:1.5px solid transparent; text-transform:uppercase; user-select:none; }
+.customer-avatar-lg { width:46px; height:46px; min-width:46px; font-size:1.15rem; }
+
+/* 8 Distinct Agribusiness Color Themes */
+.customer-theme-emerald { background:#dcfce7; color:#14532d; border-color:#86efac; }
+.customer-theme-cobalt { background:#dbeafe; color:#1e40af; border-color:#93c5fd; }
+.customer-theme-amber { background:#fef3c7; color:#854d0e; border-color:#fde047; }
+.customer-theme-amethyst { background:#f3e8ff; color:#6b21a8; border-color:#d8b4fe; }
+.customer-theme-teal { background:#ccfbf1; color:#0f766e; border-color:#5eead4; }
+.customer-theme-terracotta { background:#ffedd5; color:#9a3412; border-color:#fdba74; }
+.customer-theme-slate { background:#f1f5f9; color:#334155; border-color:#cbd5e1; }
+.customer-theme-ruby { background:#ffe4e6; color:#9f1239; border-color:#fda4af; }
+
+/* Customer Type Badges */
+.badge-customer-type { font-size:.74rem; font-weight:700; padding:4px 9px; border-radius:6px; letter-spacing:.02em; display:inline-flex; align-items:center; gap:5px; border:1px solid transparent; }
+.badge-type-wholesale { background:#ede9fe; color:#5b21b6; border-color:#ddd6fe; }
+.badge-type-retail { background:#dcfce7; color:#15803d; border-color:#bbf7d0; }
+.badge-type-institution { background:#e0f2fe; color:#0369a1; border-color:#bae6fd; }
+.badge-type-other { background:#f1f5f9; color:#475569; border-color:#e2e8f0; }
+
+/* Financial Debt Balance Pills */
+.badge-balance { font-size:.76rem; font-weight:800; padding:5px 10px; border-radius:999px; display:inline-flex; align-items:center; gap:5px; border:1px solid transparent; }
+.badge-balance-cleared { background:#dcfce7; color:#15803d; border-color:#86efac; }
+.badge-balance-owing { background:#fef3c7; color:#854d0e; border-color:#fde047; }
+.badge-balance-high { background:#fee2e2; color:#991b1b; border-color:#fca5a5; }
+
+/* Payments Professional Enterprise Styling */
+.payment-id-pill { font-family:monospace; font-size:.82rem; font-weight:700; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; padding:4px 8px; display:inline-flex; align-items:center; color:#0f172a; }
+.sales-link-pill { font-family:monospace; font-size:.8rem; font-weight:700; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:6px; padding:4px 8px; text-decoration:none; display:inline-flex; align-items:center; transition:all .15s ease; }
+.sales-link-pill:hover { background:#dbeafe; color:#1e40af; border-color:#93c5fd; }
+.badge-channel-momo { background:#fef9c3; color:#854d0e; border:1px solid #fde047; font-weight:700; font-size:.76rem; padding:4px 10px; border-radius:99px; display:inline-flex; align-items:center; }
+.badge-channel-cash { background:#dcfce7; color:#14532d; border:1px solid #86efac; font-weight:700; font-size:.76rem; padding:4px 10px; border-radius:99px; display:inline-flex; align-items:center; }
+.badge-channel-bank { background:#dbeafe; color:#1e40af; border:1px solid #93c5fd; font-weight:700; font-size:.76rem; padding:4px 10px; border-radius:99px; display:inline-flex; align-items:center; }
+.badge-channel-other { background:#f1f5f9; color:#334155; border:1px solid #cbd5e1; font-weight:700; font-size:.76rem; padding:4px 10px; border-radius:99px; display:inline-flex; align-items:center; }
+.payment-ref-chip { font-family:monospace; font-size:.76rem; background:#f8fafc; border:1px dashed #cbd5e1; padding:3px 8px; border-radius:4px; color:#334155; display:inline-flex; align-items:center; gap:4px; font-weight:600; }
+.payment-amount-cell { font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:.98rem; color:#15803d; letter-spacing:-.01em; }
+.operator-pill { font-size:.75rem; font-weight:600; color:#334155; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:3px 8px; display:inline-flex; align-items:center; gap:5px; }
+.table-filter-btn { border-radius:20px; font-size:.78rem; font-weight:700; padding:5px 14px; border:1px solid #cbd5e1; background:#fff; color:#334155; cursor:pointer; transition:all .15s ease; }
+.table-filter-btn:hover { background:#f1f5f9; }
+.table-filter-btn.active { background:#0d1a13; color:#fff; border-color:#0d1a13; }
+.receipt-paper { background:#fff; border:1px solid #cbd5e1; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.08); padding:28px 24px; font-family:'Inter',sans-serif; color:#0f172a; }
+.receipt-header { border-bottom:2px dashed #cbd5e1; padding-bottom:16px; margin-bottom:16px; }
+.receipt-table th { font-size:.75rem; color:#64748b; text-transform:uppercase; letter-spacing:.05em; padding:8px; border-bottom:1px solid #e2e8f0; }
+.receipt-table td { font-size:.85rem; padding:10px 8px; border-bottom:1px solid #f1f5f9; }
+.receipt-stamp { display:inline-block; border:2px solid #16a34a; color:#16a34a; font-weight:800; text-transform:uppercase; letter-spacing:.1em; font-size:.72rem; padding:4px 10px; border-radius:4px; transform:rotate(-4deg); }
+

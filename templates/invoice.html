@@ -65,7 +65,7 @@
             <td>{{ row.invoice_number or '—' }}</td>
             <td>{{ row.sales_id }}</td>
             <td>{{ row.sale_date|pretty_date }}</td>
-            <td>{{ row.customer_name }}<small class="d-block text-muted">{{ row.customer_phone or '' }}</small></td>
+            <td><div class="customer-chip"><span class="customer-avatar {{ row.customer_name|customer_theme }}">{{ row.customer_name|customer_initials }}</span><div><div class="customer-name-text">{{ row.customer_name }}</div><small class="text-muted">{{ row.customer_phone or '' }}</small></div></div></td>
             <td>{{ row.total_sale|money }}</td>
             <td><span class="invoice-status status-{{ row.status|lower|replace(' ', '-') }}">{{ row.status }}</span></td>
             <td class="text-end">
