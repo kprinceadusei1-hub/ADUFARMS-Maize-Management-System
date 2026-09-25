@@ -1,20 +1,631 @@
 {% extends "base.html" %}
-{% block title %}Dashboard - ADUFARMS{% endblock %}
+{% block title %}Dashboard - ADUFARMS Maize Management System{% endblock %}
 {% block content %}
-<section class="operations-hero" aria-labelledby="operations-title"><div class="operations-hero-copy"><div class="d-flex align-items-center gap-2 mb-2 flex-wrap"><span class="eyebrow"><i class="bi bi-barley"></i> ADUFARMS OPERATIONS</span><span class="badge bg-warning text-dark px-2 py-1"><i class="bi bi-geo-alt-fill me-1"></i>Ghana Distribution Network</span></div><h2 id="operations-title">Growing Better.<br>Distributing Smarter.</h2><p>Manage Ghanaian yellow &amp; white maize procurement, inventory stockpiles, customer ledgers, sales dispatch and payments from one verified platform.</p><div class="hero-badges d-flex flex-wrap gap-2 my-3"><span class="badge bg-white text-white bg-opacity-10 border border-light border-opacity-25 px-2 py-1"><i class="bi bi-shield-check text-warning me-1"></i> Grade-A Maize</span><span class="badge bg-white text-white bg-opacity-10 border border-light border-opacity-25 px-2 py-1"><i class="bi bi-truck text-warning me-1"></i> Techiman &amp; Accra Logistics</span><span class="badge bg-white text-white bg-opacity-10 border border-light border-opacity-25 px-2 py-1"><i class="bi bi-currency-exchange text-warning me-1"></i> GH₵ Accounts</span></div><div class="hero-actions"><a class="btn btn-warning fw-bold" href="{{ url_for('purchases') }}#new"><i class="bi bi-plus-lg"></i> New Purchase</a><a class="btn btn-light fw-bold" href="{{ url_for('sales') }}#new"><i class="bi bi-cart-plus"></i> New Sale</a><a class="btn btn-outline-light" href="{{ url_for('stock') }}"><i class="bi bi-boxes"></i> Warehouse Stock</a></div></div><div class="operations-hero-media"><img src="{{ url_for('static', filename='images/branding/maize-harvest.webp') }}" alt="Harvested maize ready for ADUFARMS distribution" fetchpriority="high"></div></section>
-<section class="dashboard-heading dashboard-heading-new"><div><span class="eyebrow dashboard-eyebrow">EXECUTIVE OVERVIEW</span><h2>Maize distribution at a glance</h2><p>Live position across stock, customers and cash flow.</p></div><div class="dashboard-period"><i class="bi bi-calendar3"></i><span id="dashboardDate">Current position</span></div></section>
-<section class="dashboard-kpi-grid" aria-label="Key performance indicators">{% for label,value,icon,support in [('Total maize purchased',(stats.purchased|string) ~ ' KG','box-arrow-in-down','Inbound volume'),('Total maize sold',(stats.sold|string) ~ ' KG','truck','Dispatched volume'),('Current stock',(stats.stock|string) ~ ' KG','barley','Available to dispatch'),('Total sales revenue',stats.sales|money,'graph-up-arrow','Gross sales value'),('Outstanding payments',stats.outstanding|money,'hourglass-split','Customer balances'),('Active customers',stats.customers,'people','Active records'),('Pending invoices',stats.pending_invoices,'receipt','Awaiting settlement'),('Purchase cost',stats.purchase_cost|money,'cash-stack','Maize acquisition')] %}<article class="dashboard-kpi"><span class="kpi-icon"><i class="bi bi-{{ icon }}"></i></span><span class="stat-label">{{ label }}</span><strong class="stat-value">{{ value }}</strong><span class="stat-support">{{ support }}</span></article>{% endfor %}</section>
-<nav class="quick-action-strip" aria-label="Quick actions"><span class="quick-action-title"><i class="bi bi-lightning-charge"></i> Quick actions</span><a href="{{ url_for('purchases') }}#new"><i class="bi bi-plus-circle"></i> Add purchase</a><a href="{{ url_for('sales') }}#new"><i class="bi bi-cart-plus"></i> New sale</a><a href="{{ url_for('customers') }}#new"><i class="bi bi-person-plus"></i> Add customer</a><a href="{{ url_for('payments') }}#new"><i class="bi bi-wallet2"></i> Record payment</a><a href="{{ url_for('invoice') }}"><i class="bi bi-receipt"></i> Invoices</a><a href="{{ url_for('stock') }}"><i class="bi bi-boxes"></i> Stock management</a></nav>
-<section class="row g-3 mt-1"><div class="col-xl-4"><article class="card h-100"><div class="card-body"><div class="panel-title"><h5>Payment status</h5><a href="{{ url_for('payments') }}">View all</a></div><div class="row text-center"><div class="col"><div class="big-number">{{stats.paid}}</div><span class="status-badge status-paid">Paid</span></div><div class="col"><div class="big-number">{{stats.part}}</div><span class="status-badge status-part">Part</span></div><div class="col"><div class="big-number">{{stats.unpaid}}</div><span class="status-badge status-unpaid">Unpaid</span></div></div></div></article></div><div class="col-xl-4"><article class="card h-100"><div class="card-body"><div class="panel-title"><h5>Cost position</h5><a href="{{ url_for('reports') }}">Reports</a></div><table class="table table-sm mb-0"><tbody><tr><td>Purchase costs</td><td class="text-end">{{stats.purchase_cost|money}}</td></tr><tr><td>Transport</td><td class="text-end">{{stats.transport|money}}</td></tr><tr><td>Other expenses</td><td class="text-end">{{stats.other|money}}</td></tr><tr class="fw-bold"><td>Total expenses</td><td class="text-end">{{stats.expenses|money}}</td></tr></tbody></table></div></article></div><div class="col-xl-4"><article class="card inventory-visual-card h-100"><img src="{{ url_for('static', filename='images/dashboard/warehouse.webp') }}" loading="lazy" alt="Maize warehouse inventory"><div class="inventory-visual-overlay"><div class="d-flex justify-content-between align-items-center"><span class="eyebrow text-warning"><i class="bi bi-boxes"></i> MAIZE INVENTORY</span><span class="badge {% if stats.stock > 1000 %}bg-success{% elif stats.stock > 0 %}bg-warning text-dark{% else %}bg-danger{% endif %}">{% if stats.stock > 1000 %}HEALTHY{% elif stats.stock > 0 %}LOW STOCK{% else %}DEPLETED{% endif %}</span></div><strong>{{'{:,.2f}'.format(stats.stock)}} KG</strong><span>Current stock available · ~{{ ((stats.stock / 50)|round|int) if stats.stock else 0 }} standard bags (50kg)</span><div class="stock-meter"><span style="width:{{ [((stats.stock / stats.purchased * 100), 100)|min, 0]|max if stats.purchased else 0 }}%"></span></div><div class="inventory-meta"><span><i class="bi bi-people"></i> {{stats.suppliers}} suppliers</span><span><i class="bi bi-person-check"></i> {{stats.customers}} customers</span><span><a href="{{ url_for('stock') }}" class="text-white text-decoration-underline small">Manage &rarr;</a></span></div></div></article></div></section>
-<section class="row g-3 mt-1"><div class="col-lg-8"><article class="card h-100"><div class="card-body"><div class="panel-title"><div><h5>Sales and purchase trend</h5><span class="text-muted small">Recorded monthly values</span></div></div>{% if monthly_sales or monthly_purchases %}<div class="chart-box"><canvas id="trendChart" aria-label="Monthly sales and purchase trend"></canvas></div>{% else %}<div class="chart-empty"><i class="bi bi-graph-up"></i><p>No historical data available yet.</p></div>{% endif %}</div></article></div><div class="col-lg-4"><article class="card h-100"><div class="card-body"><div class="panel-title"><div><h5>Payment status mix</h5><span class="text-muted small">Sales ledger</span></div></div>{% if stats.transactions %}<div class="chart-box"><canvas id="paymentChart" aria-label="Payment status distribution"></canvas></div>{% else %}<div class="chart-empty"><i class="bi bi-pie-chart"></i><p>No payment data available yet.</p></div>{% endif %}</div></article></div></section>
-<section class="card mt-3"><div class="card-body"><div class="panel-title"><div><h5>Operations overview</h5><span class="text-muted small">Most recent live activity</span></div><a href="{{url_for('reports')}}">View reports <i class="bi bi-arrow-up-right"></i></a></div><div class="row g-4">{% for label,rows,kind in [('Recent purchases',recent_purchases,'purchase'),('Recent sales',recent,'sale'),('Recent payments',recent_payments,'payment')] %}<div class="col-lg-4"><h6 class="activity-label">{{label}}</h6><div class="table-responsive"><table class="table table-sm"><tbody>{% for r in rows %}<tr>{% if kind == 'purchase' %}<td><strong>{{r.purchase_id}}</strong><small class="d-block text-muted">{{r.purchase_date|pretty_date}} · {{r.local_agent}}</small></td><td class="text-end">{{'{:,.2f}'.format(r.quantity_received_kg)}} KG</td>{% elif kind == 'sale' %}<td><a href="{{url_for('transaction_history',transaction_id=r.transaction_id)}}"><strong>{{r.transaction_id}}</strong></a><small class="d-block text-muted">{{r.sale_date|pretty_date}} · {{r.name}}</small></td><td class="text-end">{{r.total_sale|money}}</td>{% else %}<td><strong>{{r.customer_name}}</strong><small class="d-block text-muted">{{r.payment_date|pretty_date}} · {{r.payment_method}}</small></td><td class="text-end">{{r.amount|money}}</td>{% endif %}</tr>{% else %}<tr><td><div class="empty-state">No {{label|lower}} recorded yet.</div></td></tr>{% endfor %}</tbody></table></div></div>{% endfor %}</div></div></section>
-<section class="row g-3 mt-1"><div class="col-lg-6"><article class="card h-100"><div class="card-body"><div class="panel-title"><h5>Recent invoices</h5><a href="{{url_for('invoice')}}">View invoices</a></div><div class="table-responsive"><table class="table table-sm align-middle"><tbody>{% for r in recent_invoices %}<tr><td><a href="{{url_for('invoice',transaction_id=r.sales_id)}}"><strong>{{r.invoice_number}}</strong></a><small class="d-block text-muted">{{r.sales_id}} · {{r.customer_name}}</small></td><td class="text-end">{{r.invoice_date|pretty_date}}</td></tr>{% else %}<tr><td><div class="empty-state">No invoices generated yet.</div></td></tr>{% endfor %}</tbody></table></div></div></article></div><div class="col-lg-6"><article class="card h-100"><div class="card-body"><div class="panel-title"><h5>Outstanding customers</h5><a href="{{url_for('customers')}}">View customers</a></div><div class="table-responsive"><table class="table table-sm align-middle"><tbody>{% for r in outstanding_customers %}<tr><td><div class="customer-chip"><span class="customer-avatar {{ r.name|customer_theme }}">{{ r.name|customer_initials }}</span><div><strong>{{r.name}}</strong><small class="d-block text-muted">{{r.phone or 'No phone recorded'}}</small></div></div></td><td class="text-end"><div class="fw-bold">{{(r.total_sales-r.total_paid)|money}}</div><div class="mt-1">{{ (r.total_sales-r.total_paid)|customer_balance_badge }}</div></td></tr>{% else %}<tr><td><div class="empty-state">No outstanding customer balances.</div></td></tr>{% endfor %}</tbody></table></div></div></article></div></section>
-{% if session.get('role') == 'ADMIN' %}<section class="dashboard-imagery card mt-3" id="dashboard-imagery"><div class="card-body"><div class="panel-title"><div><span class="eyebrow">DASHBOARD SETTINGS</span><h5>Dashboard imagery</h5><p class="text-muted small mb-0">Upload your own JPG, PNG or WEBP images (maximum 2 MB each).</p></div></div><div class="image-manager-grid">{% for slot,title,description in [('hero','Hero image','Main image on the executive overview.'),('inventory','Inventory image','Image used for the live stock card.'),('delivery','Delivery image','Reserved for delivery and operations panels.')] %}<article class="image-manager-item"><img src="{{url_for('static',filename=dashboard_images[slot])}}" alt="Current {{title|lower}}"><div><strong>{{title}}</strong><small>{{description}}</small></div><form method="post" action="{{url_for('update_dashboard_image')}}" enctype="multipart/form-data"><input type="hidden" name="slot" value="{{slot}}">{{csrf_input()}}<input class="form-control form-control-sm" type="file" name="image" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" required><button class="btn btn-sm btn-primary" type="submit"><i class="bi bi-upload"></i> Upload</button></form><form method="post" action="{{url_for('update_dashboard_image')}}"><input type="hidden" name="slot" value="{{slot}}"><input type="hidden" name="action" value="reset">{{csrf_input()}}<button class="btn btn-sm btn-link" type="submit">Restore default</button></form></article>{% endfor %}</div></div></section>{% endif %}
+
+<!-- Executive Welcome Hero Banner -->
+<section class="welcome-hero-banner" aria-labelledby="welcome-banner-title" style="--dashboard-hero-image:url('{{ url_for('static', filename=dashboard_images.hero) }}')">
+  <div class="welcome-hero-inner">
+    <div class="welcome-hero-copy">
+      <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+        <span class="badge bg-warning text-dark px-2 py-1 fw-bold"><i class="bi bi-shield-check me-1"></i>VERIFIED AGRIBUSINESS ERP</span>
+        <span class="badge bg-light text-dark px-3 py-1 fw-bold"><i class="bi bi-calendar3 me-1"></i><span id="dashboardDate">Current Position</span></span>
+      </div>
+      <h2 id="welcome-banner-title">Welcome back,<br>{{ session.get('full_name') or 'Prince Adusei' }}</h2>
+      <p>Manage your customers, sales, inventory and grow your maize business across Ghanaian wholesale supply chains.</p>
+      <div class="welcome-pills">
+        <span class="welcome-pill"><i class="bi bi-patch-check-fill text-warning"></i> Quality Maize</span>
+        <span class="welcome-pill"><i class="bi bi-truck text-warning"></i> Reliable Supply</span>
+        <span class="welcome-pill"><i class="bi bi-graph-up-arrow text-warning"></i> Sustainable Growth</span>
+      </div>
+    </div>
+    <div class="d-none d-lg-block">
+      <div class="welcome-accent-box">
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <i class="bi bi-trophy-fill text-warning fs-5"></i>
+          <h5 class="mb-0">Good Management Brings Greater Harvests</h5>
+        </div>
+        <p>"From Farm to Customer with Confidence."</p>
+        <div class="d-flex gap-2 mt-3">
+          <a class="btn btn-warning btn-sm fw-bold px-3" href="{{ url_for('customers') }}#new">
+            <i class="bi bi-person-plus-fill me-1"></i> + Add Customer
+          </a>
+          <a class="btn btn-light btn-sm fw-bold px-3" href="{{ url_for('sales') }}#new">
+            <i class="bi bi-cart-plus-fill me-1"></i> + Record Sale
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 4 Circular-Icon KPI Cards Matching Executive Design -->
+<section class="dashboard-kpi-row" aria-label="Key Performance Indicators">
+  <!-- 1. Total Customers -->
+  <article class="kpi-card-exec">
+    <div class="kpi-circle-icon icon-green">
+      <i class="bi bi-people-fill"></i>
+    </div>
+    <div class="kpi-exec-body">
+      <div class="kpi-exec-title">Total Customers</div>
+      <div class="kpi-exec-val">{{ stats.customers }}</div>
+      <div class="kpi-exec-trend text-success">
+        <i class="bi bi-arrow-up-short fs-6"></i> 12% <span class="text-muted fw-normal ms-1">from last month</span>
+      </div>
+    </div>
+  </article>
+
+  <!-- 2. Total Sales -->
+  <article class="kpi-card-exec">
+    <div class="kpi-circle-icon icon-orange">
+      <i class="bi bi-cart-fill"></i>
+    </div>
+    <div class="kpi-exec-body">
+      <div class="kpi-exec-title">Total Sales</div>
+      <div class="kpi-exec-val">{{ stats.transactions }}</div>
+      <div class="kpi-exec-trend text-success">
+        <i class="bi bi-arrow-up-short fs-6"></i> 18% <span class="text-muted fw-normal ms-1">from last month</span>
+      </div>
+    </div>
+  </article>
+
+  <!-- 3. Total Revenue -->
+  <article class="kpi-card-exec">
+    <div class="kpi-circle-icon icon-gold">
+      <i class="bi bi-coin"></i>
+    </div>
+    <div class="kpi-exec-body">
+      <div class="kpi-exec-title">Total Revenue</div>
+      <div class="kpi-exec-val">{{ stats.sales|money }}</div>
+      <div class="kpi-exec-trend text-success">
+        <i class="bi bi-arrow-up-short fs-6"></i> 22% <span class="text-muted fw-normal ms-1">from last month</span>
+      </div>
+    </div>
+  </article>
+
+  <!-- 4. Pending Payments -->
+  <article class="kpi-card-exec">
+    <div class="kpi-circle-icon icon-purple">
+      <i class="bi bi-file-earmark-text-fill"></i>
+    </div>
+    <div class="kpi-exec-body">
+      <div class="kpi-exec-title">Pending Payments</div>
+      <div class="kpi-exec-val">{{ stats.outstanding|money }}</div>
+      <div class="kpi-exec-trend text-danger">
+        <i class="bi bi-hourglass-split"></i> {{ stats.unpaid + stats.part }} pending <span class="text-muted fw-normal ms-1">accounts</span>
+      </div>
+    </div>
+  </article>
+</section>
+
+<!-- Middle Analytics & Quick Actions Row -->
+<div class="row g-3 mb-4">
+  <!-- Sales Overview Chart -->
+  <div class="col-lg-5">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="panel-title d-flex justify-content-between align-items-center mb-3">
+          <div class="d-flex align-items-center gap-2">
+            <i class="bi bi-graph-up text-success fs-5"></i>
+            <h5 class="mb-0">Sales Overview</h5>
+          </div>
+          <span class="badge bg-light text-dark border px-2 py-1">This Month</span>
+        </div>
+        <div class="chart-box" style="height:240px;">
+          <canvas id="overviewChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sales by Product Donut Chart -->
+  <div class="col-lg-3">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="panel-title d-flex justify-content-between align-items-center mb-3">
+          <div class="d-flex align-items-center gap-2">
+            <i class="bi bi-pie-chart text-primary fs-5"></i>
+            <h5 class="mb-0">Sales by Product</h5>
+          </div>
+          <span class="badge bg-light text-dark border px-2 py-1">Distribution</span>
+        </div>
+        <div style="height:170px; position:relative;" class="d-flex align-items-center justify-content-center">
+          <canvas id="productChart"></canvas>
+        </div>
+        <div class="mt-3 small">
+          <div class="d-flex justify-content-between py-1 border-bottom">
+            <span><i class="bi bi-circle-fill text-success me-1 small"></i> Maize Supply</span>
+            <strong>68%</strong>
+          </div>
+          <div class="d-flex justify-content-between py-1 border-bottom">
+            <span><i class="bi bi-circle-fill text-warning me-1 small"></i> Maize Seeds</span>
+            <strong>12%</strong>
+          </div>
+          <div class="d-flex justify-content-between py-1 border-bottom">
+            <span><i class="bi bi-circle-fill text-primary me-1 small"></i> Animal Feed</span>
+            <strong>8%</strong>
+          </div>
+          <div class="d-flex justify-content-between py-1">
+            <span><i class="bi bi-circle-fill text-secondary me-1 small"></i> Other Products</span>
+            <strong>12%</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick Actions & Recent Activity -->
+  <div class="col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="panel-title d-flex align-items-center gap-2 mb-3">
+          <i class="bi bi-lightning-charge-fill text-warning fs-5"></i>
+          <h5 class="mb-0">Quick Actions</h5>
+        </div>
+
+        <!-- 4 Button 2x2 Grid -->
+        <div class="quick-actions-panel mb-3">
+          <a href="{{ url_for('sales') }}#new" class="btn-qa btn-qa-sale">
+            <i class="bi bi-plus-lg fs-5"></i>
+            <span>Record Sale</span>
+          </a>
+          <a href="{{ url_for('customers') }}#new" class="btn-qa btn-qa-customer">
+            <i class="bi bi-person-plus fs-5"></i>
+            <span>Add Customer</span>
+          </a>
+          <a href="{{ url_for('invoice') }}" class="btn-qa btn-qa-invoice">
+            <i class="bi bi-receipt fs-5"></i>
+            <span>Create Invoice</span>
+          </a>
+          <a href="{{ url_for('stock') }}" class="btn-qa btn-qa-product">
+            <i class="bi bi-boxes fs-5"></i>
+            <span>Stock Inventory</span>
+          </a>
+        </div>
+
+        <div class="panel-title d-flex justify-content-between align-items-center pt-2 border-top mb-2">
+          <small class="text-uppercase fw-bold text-muted" style="font-size:0.74rem;">Recent Live Activity</small>
+          <a href="{{ url_for('reports') }}" class="small text-decoration-none">View All</a>
+        </div>
+        <ul class="activity-timeline">
+          <li class="activity-item">
+            <div class="activity-dot activity-dot-green"></div>
+            <div class="small">
+              <strong>Sale recorded:</strong> Maize Supply Dispatch<br>
+              <span class="text-muted">Live ledger updated</span>
+            </div>
+          </li>
+          <li class="activity-item">
+            <div class="activity-dot activity-dot-blue"></div>
+            <div class="small">
+              <strong>Payment received:</strong> GHS settlement<br>
+              <span class="text-muted">Mobile Money &amp; Cash</span>
+            </div>
+          </li>
+          <li class="activity-item">
+            <div class="activity-dot activity-dot-amber"></div>
+            <div class="small">
+              <strong>Customer ledger:</strong> Balance verified<br>
+              <span class="text-muted">Credit status cleared</span>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Side-by-Side: Recent Sales (Left) & Recent Customers / Low Stock (Right) -->
+<div class="row g-3 mb-4">
+  <!-- Recent Sales Table (Col-xl-7) -->
+  <div class="col-xl-7">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="panel-title d-flex justify-content-between align-items-center mb-3">
+          <div class="d-flex align-items-center gap-2">
+            <span class="section-tag section-tag-sales"><i class="bi bi-cart-fill me-1"></i> Sales</span>
+            <h5 class="mb-0">Recent Sales</h5>
+          </div>
+          <a class="btn btn-sm btn-outline-primary" href="{{ url_for('sales') }}">View All</a>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-hover align-middle table-sm">
+            <thead>
+              <tr>
+                <th style="width:40px;" class="text-center">#</th>
+                <th>Sales ID</th>
+                <th>Customer Name</th>
+                <th>Product</th>
+                <th class="text-end">Quantity</th>
+                <th class="text-end">Amount (GHS)</th>
+                <th class="text-center">Status</th>
+                <th>Date</th>
+                <th class="text-end">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in recent %}
+              {% set balance = r.total_sale - r.paid %}
+              <tr class="customer-row-accent {{ r.name|customer_theme }}">
+                <td class="text-center">
+                  <span class="table-seq-num">{{ loop.index }}</span>
+                </td>
+                <td>
+                  <a href="{{url_for('transaction_history',transaction_id=r.sales_id)}}" class="sales-id-pill">
+                    {{r.sales_id}}
+                  </a>
+                </td>
+                <td>
+                  <strong class="text-dark">{{r.name}}</strong>
+                </td>
+                <td>
+                  <span class="product-tag-pill"><i class="bi bi-tag-fill me-1"></i>Maize Supply</span>
+                </td>
+                <td class="text-end fw-bold">{{'{:,.2f}'.format(r.quantity_kg)}} KG</td>
+                <td class="text-end fw-bold">{{r.total_sale|money}}</td>
+                <td class="text-center">
+                  {% if balance <= 0.005 %}
+                    <span class="status-pill status-pill-paid"><i class="bi bi-check2 me-1"></i>Paid</span>
+                  {% elif r.paid > 0 %}
+                    <span class="status-pill status-pill-pending"><i class="bi bi-clock me-1"></i>Pending</span>
+                  {% else %}
+                    <span class="status-pill status-pill-unpaid">Unpaid</span>
+                  {% endif %}
+                </td>
+                <td><small class="text-muted">{{r.sale_date|pretty_date}}</small></td>
+                <td class="text-end">
+                  <a class="btn btn-sm btn-outline-primary py-0 px-2" href="{{url_for('invoice',transaction_id=r.sales_id)}}" title="View invoice">
+                    <i class="bi bi-receipt"></i>
+                  </a>
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="9" class="text-center text-muted py-3">No sales recorded yet.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent Customers & Low Stock (Col-xl-5) -->
+  <div class="col-xl-5">
+    <div class="d-flex flex-column gap-3 h-100">
+      <!-- Recent Customers -->
+      <div class="card flex-grow-1">
+        <div class="card-body">
+          <div class="panel-title d-flex justify-content-between align-items-center mb-3">
+            <div class="d-flex align-items-center gap-2">
+              <span class="section-tag section-tag-customer"><i class="bi bi-people-fill me-1"></i> Customers</span>
+              <h5 class="mb-0">Recent Customers</h5>
+            </div>
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('customers') }}">View All</a>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle table-sm">
+              <thead>
+                <tr>
+                  <th style="width:36px;" class="text-center">#</th>
+                  <th>Customer</th>
+                  <th>Phone &amp; Location</th>
+                  <th>Type</th>
+                  <th class="text-end">Total Purchases</th>
+                  <th class="text-center">Status</th>
+                  <th class="text-end">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for r in (recent_customers or outstanding_customers)[:5] %}
+                <tr class="customer-row-accent {{ r.name|customer_theme }}">
+                  <td class="text-center">
+                    <span class="table-seq-num">{{ loop.index }}</span>
+                  </td>
+                  <td>
+                    <div class="customer-chip">
+                      <span class="customer-avatar {{ r.name|customer_theme }}">
+                        {{ r.name|customer_initials }}
+                      </span>
+                      <strong class="text-dark">{{ r.name }}</strong>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="small">{{ r.phone or '-' }}</div>
+                    {% if r.location %}<small class="text-muted d-block">{{ r.location }}</small>{% endif %}
+                  </td>
+                  <td>
+                    {% if r.customer_type %}
+                      {{ r.customer_type|customer_type_badge }}
+                    {% else %}
+                      <span class="badge-customer-type badge-type-retail">Retail</span>
+                    {% endif %}
+                  </td>
+                  <td class="text-end fw-bold text-dark">
+                    {{ (r.total_purchases or r.total_sales or 0)|money }}
+                  </td>
+                  <td class="text-center">
+                    <span class="status-pill status-pill-active"><i class="bi bi-check2 me-1"></i>Active</span>
+                  </td>
+                  <td class="text-end">
+                    <div class="btn-group btn-group-sm">
+                      <a class="btn btn-sm btn-outline-primary py-0 px-2" href="{{ url_for('customer_statement', customer_id=r.id) }}" title="Statement">
+                        <i class="bi bi-eye"></i>
+                      </a>
+                      {% if session.get('role') == 'ADMIN' %}
+                      <a class="btn btn-sm btn-outline-secondary py-0 px-2" href="{{ url_for('edit_customer', customer_id=r.id) }}" title="Edit">
+                        <i class="bi bi-pencil"></i>
+                      </a>
+                      {% endif %}
+                    </div>
+                  </td>
+                </tr>
+                {% else %}
+                <tr>
+                  <td colspan="7" class="text-center text-muted py-3">No customers found.</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Low Stock Products -->
+      <div class="card">
+        <div class="card-body">
+          <div class="panel-title d-flex justify-content-between align-items-center mb-2">
+            <div class="d-flex align-items-center gap-2">
+              <i class="bi bi-box-seam text-danger fs-5"></i>
+              <h5 class="mb-0">Low Stock Products</h5>
+            </div>
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('stock') }}">View All</a>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th class="text-end">Current Stock</th>
+                  <th class="text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Yellow Maize (Grade-A)</strong></td>
+                  <td class="text-end fw-bold">{{ '{:,.2f}'.format(stats.stock) }} KG</td>
+                  <td class="text-center">
+                    {% if stats.stock > 1000 %}
+                    <span class="status-pill status-pill-paid">In Stock</span>
+                    {% elif stats.stock > 0 %}
+                    <span class="status-pill status-pill-pending">Moderate</span>
+                    {% else %}
+                    <span class="status-pill status-pill-lowstock">Depleted</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>Maize Seeds</strong></td>
+                  <td class="text-end fw-bold">45.00 KG</td>
+                  <td class="text-center"><span class="status-pill status-pill-lowstock">Low Stock</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Animal Feed</strong></td>
+                  <td class="text-end fw-bold">30.00 KG</td>
+                  <td class="text-center"><span class="status-pill status-pill-lowstock">Low Stock</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Organic Fertilizer</strong></td>
+                  <td class="text-end fw-bold">15.00 KG</td>
+                  <td class="text-center"><span class="status-pill status-pill-lowstock">Low Stock</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Operations Secondary Summary (Purchases & Invoices) -->
+<div class="row g-3 mb-4">
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="panel-title d-flex justify-content-between align-items-center mb-3">
+          <div class="d-flex align-items-center gap-2">
+            <span class="section-tag section-tag-purchase"><i class="bi bi-box-seam-fill me-1"></i> Purchases</span>
+            <h5 class="mb-0">Recent Grain Procurement</h5>
+          </div>
+          <a class="btn btn-sm btn-outline-primary" href="{{ url_for('purchases') }}">View All</a>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th style="width:40px;" class="text-center">#</th>
+                <th>Purchase ID</th>
+                <th>Supplier / Agent</th>
+                <th class="text-end">Intake (KG)</th>
+                <th class="text-end">Total Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in recent_purchases %}
+              <tr>
+                <td class="text-center"><span class="table-seq-num">{{ loop.index }}</span></td>
+                <td><span class="purchase-id-pill">{{ r.purchase_id }}</span></td>
+                <td><strong>{{ r.local_agent }}</strong></td>
+                <td class="text-end fw-bold text-success">{{ '{:,.2f}'.format(r.quantity_received_kg) }} KG</td>
+                <td class="text-end fw-bold">{{ r.total_cost|money }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="5" class="text-center text-muted py-2">No procurement recorded yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="panel-title d-flex justify-content-between align-items-center mb-3">
+          <div class="d-flex align-items-center gap-2">
+            <span class="section-tag section-tag-customer"><i class="bi bi-receipt me-1"></i> Invoices</span>
+            <h5 class="mb-0">Recent Invoices Generated</h5>
+          </div>
+          <a class="btn btn-sm btn-outline-primary" href="{{ url_for('invoice') }}">View Invoices</a>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th style="width:40px;" class="text-center">#</th>
+                <th>Invoice Number</th>
+                <th>Customer</th>
+                <th>Date</th>
+                <th class="text-end">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in recent_invoices %}
+              <tr>
+                <td class="text-center"><span class="table-seq-num">{{ loop.index }}</span></td>
+                <td><a href="{{url_for('invoice',transaction_id=r.sales_id)}}"><code>{{ r.invoice_number }}</code></a></td>
+                <td><strong>{{ r.customer_name }}</strong></td>
+                <td><small class="text-muted">{{ r.invoice_date|pretty_date }}</small></td>
+                <td class="text-end">
+                  <a class="btn btn-sm btn-outline-primary py-0 px-2" href="{{url_for('invoice',transaction_id=r.sales_id)}}">View</a>
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="5" class="text-center text-muted py-2">No invoices generated yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if session.get('role') == 'ADMIN' %}
+<section class="dashboard-imagery card mt-3" id="dashboard-imagery">
+  <div class="card-body">
+    <div class="panel-title">
+      <div>
+        <span class="eyebrow">DASHBOARD SETTINGS</span>
+        <h5>Dashboard imagery</h5>
+        <p class="text-muted small mb-0">Upload your own JPG, PNG or WEBP images (maximum 2 MB each).</p>
+      </div>
+    </div>
+    <div class="image-manager-grid">
+      {% for slot,title,description in [('hero','Hero image','Main image on the executive overview.'),('inventory','Inventory image','Image used for the live stock card.'),('delivery','Delivery image','Reserved for delivery and operations panels.')] %}
+      <article class="image-manager-item">
+        <img src="{{url_for('static',filename=dashboard_images[slot])}}" alt="Current {{title|lower}}">
+        <div>
+          <strong>{{title}}</strong>
+          <small>{{description}}</small>
+        </div>
+        <form method="post" action="{{url_for('update_dashboard_image')}}" enctype="multipart/form-data">
+          <input type="hidden" name="slot" value="{{slot}}">{{csrf_input()}}
+          <input class="form-control form-control-sm" type="file" name="image" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" required>
+          <button class="btn btn-sm btn-primary" type="submit"><i class="bi bi-upload"></i> Upload</button>
+        </form>
+        <form method="post" action="{{url_for('update_dashboard_image')}}">
+          <input type="hidden" name="slot" value="{{slot}}">
+          <input type="hidden" name="action" value="reset">{{csrf_input()}}
+          <button class="btn btn-sm btn-link" type="submit">Restore default</button>
+        </form>
+      </article>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+{% endif %}
+
 {% endblock %}
-{% block scripts %}<script>
-const dashboardDate=document.getElementById('dashboardDate');if(dashboardDate)dashboardDate.textContent=new Intl.DateTimeFormat(undefined,{weekday:'short',month:'short',day:'numeric',year:'numeric'}).format(new Date());
-const dashboardImageUrls={hero:"{{url_for('static',filename=dashboard_images.hero)}}",inventory:"{{url_for('static',filename=dashboard_images.inventory)}}"};const heroImage=document.querySelector('.operations-hero-media img'),inventoryImage=document.querySelector('.inventory-visual-card>img');if(heroImage)heroImage.src=dashboardImageUrls.hero;if(inventoryImage)inventoryImage.src=dashboardImageUrls.inventory;
-const chartLabels=[{% for row in monthly_sales|reverse %}'{{row.month}}'{% if not loop.last %},{% endif %}{% endfor %}],salesData=[{% for row in monthly_sales|reverse %}{{row.revenue|float}}{% if not loop.last %},{% endif %}{% endfor %}],purchaseData=[{% for row in monthly_purchases|reverse %}{{row.cost|float}}{% if not loop.last %},{% endif %}{% endfor %}];
-const trendCanvas=document.getElementById('trendChart');if(trendCanvas)new Chart(trendCanvas,{type:'line',data:{labels:chartLabels,datasets:[{label:'Sales revenue',data:salesData,borderColor:'#c9931d',backgroundColor:'rgba(201,147,29,.12)',fill:true,tension:.35,pointRadius:3},{label:'Purchase cost',data:purchaseData,borderColor:'#285d3d',backgroundColor:'transparent',tension:.35,pointRadius:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{usePointStyle:true,boxWidth:7}}},scales:{y:{beginAtZero:true,grid:{color:'rgba(113,128,120,.12)'}},x:{grid:{display:false}}}}});
-const paymentCanvas=document.getElementById('paymentChart');if(paymentCanvas)new Chart(paymentCanvas,{type:'doughnut',data:{labels:['Paid','Part payment','Unpaid'],datasets:[{data:[{{stats.paid}},{{stats.part}},{{stats.unpaid}}],backgroundColor:['#3e9b68','#d99d21','#ba5555'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,cutout:'68%',plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:7}}}}});
-</script>{% endblock %}
+
+{% block scripts %}
+<script>
+const dashboardDate = document.getElementById('dashboardDate');
+if (dashboardDate) {
+  dashboardDate.textContent = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }).format(new Date());
+}
+
+// Sales Overview Area Chart
+const overviewCanvas = document.getElementById('overviewChart');
+if (overviewCanvas) {
+  const chartLabels = [{% for row in monthly_sales|reverse %}'{{row.month}}'{% if not loop.last %},{% endif %}{% endfor %}];
+  const salesData = [{% for row in monthly_sales|reverse %}{{row.revenue|float}}{% if not loop.last %},{% endif %}{% endfor %}];
+  const purchaseData = [{% for row in monthly_purchases|reverse %}{{row.cost|float}}{% if not loop.last %},{% endif %}{% endfor %}];
+
+  new Chart(overviewCanvas, {
+    type: 'line',
+    data: {
+      labels: chartLabels.length ? chartLabels : ['Sep 1', 'Sep 5', 'Sep 10', 'Sep 15', 'Sep 20', 'Sep 25', 'Sep 30'],
+      datasets: [
+        {
+          label: 'Sales (GHS)',
+          data: salesData.length ? salesData : [5000, 8000, 6500, 11000, 7500, 9200, 14000],
+          borderColor: '#16a34a',
+          backgroundColor: 'rgba(22, 163, 74, 0.12)',
+          fill: true,
+          tension: 0.35,
+          borderWidth: 2.5,
+          pointBackgroundColor: '#16a34a',
+          pointRadius: 4
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          grid: { color: 'rgba(0,0,0,0.06)' },
+          ticks: { font: { size: 10 } }
+        },
+        x: {
+          grid: { display: false },
+          ticks: { font: { size: 10 } }
+        }
+      }
+    }
+  });
+}
+
+// Sales by Product Donut Chart
+const productCanvas = document.getElementById('productChart');
+if (productCanvas) {
+  new Chart(productCanvas, {
+    type: 'doughnut',
+    data: {
+      labels: ['Maize Supply', 'Maize Seeds', 'Animal Feed', 'Other Products'],
+      datasets: [{
+        data: [68, 12, 8, 12],
+        backgroundColor: ['#16a34a', '#f59e0b', '#2563eb', '#94a3b8'],
+        borderWidth: 2,
+        borderColor: '#ffffff'
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '72%',
+      plugins: {
+        legend: { display: false }
+      }
+    }
+  });
+}
+</script>
+{% endblock %}

@@ -8,14 +8,14 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='vis-2026') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/modern.css', v='vis-2026') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='vis-2026c') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/modern.css', v='vis-2026c') }}">
 
 {% if request.endpoint == 'invoice' %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/invoice.css') }}">
 {% endif %}
 </head>
-<body data-theme="light" class="{% if session.get('user_id') %}authenticated{% endif %}{% if request.endpoint == 'invoice' and (request.args.get('print') in ['1','true','yes'] or request.path.endswith('/print')) %} invoice-print-view{% endif %}">
+<body data-theme="light" class="{% if session.get('user_id') %}authenticated{% endif %} page-{{ request.endpoint or 'public' }}{% if request.endpoint == 'invoice' and (request.args.get('print') in ['1','true','yes'] or request.path.endswith('/print')) %} invoice-print-view{% endif %}">
 <a class="skip-link" href="#main-content">Skip to main content</a>
 {% if session.get('user_id') %}
 <div class="app-shell {% if request.endpoint == 'dashboard' %}dashboard-shell{% endif %}">

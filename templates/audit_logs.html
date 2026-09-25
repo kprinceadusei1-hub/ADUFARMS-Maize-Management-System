@@ -8,39 +8,102 @@
     <h2>Audit Logs &amp; Activity Trail</h2>
     <p>Complete traceability of transactions, reversals, logins, and operational modifications.</p>
   </div>
-  <div class="d-flex gap-2">
-    <a class="btn btn-outline-primary btn-sm" href="{{ url_for('audit_logs', format='csv', q=query, action=action, start=start, end=end) }}"><i class="bi bi-download me-1"></i>Export CSV</a>
-    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('deleted_records') }}"><i class="bi bi-archive me-1"></i>Recycle Bin</a>
-    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin_backup') }}"><i class="bi bi-database me-1"></i>Backups</a>
+  <div class="d-flex gap-2 flex-wrap">
+    {% if rows %}
+    <button type="button" class="btn btn-outline-danger btn-sm" onclick="confirmClearAllLogs()">
+      <i class="bi bi-trash3 me-1"></i>Clear All Logs
+    </button>
+    {% endif %}
+    <a class="btn btn-outline-primary btn-sm" href="{{ url_for('audit_logs', format='csv', q=query, action=action, start=start, end=end) }}">
+      <i class="bi bi-download me-1"></i>Export CSV
+    </a>
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('deleted_records') }}">
+      <i class="bi bi-archive me-1"></i>Recycle Bin
+    </a>
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin_backup') }}">
+      <i class="bi bi-database me-1"></i>Backups
+    </a>
   </div>
 </div>
 
 <div class="card mt-3">
   <div class="card-body">
-    <div class="panel-title">
+    <div class="panel-title d-flex justify-content-between align-items-center flex-wrap gap-2">
       <h5>Activity Log ({{ rows|length }})</h5>
+      <button type="button" class="btn btn-danger btn-sm d-none" id="btnDeleteSelectedTop" onclick="confirmBulkDelete()">
+        <i class="bi bi-trash3-fill me-1"></i>Delete Selected (<span id="btnDeleteCountTop">0</span>)
+      </button>
     </div>
+
+    <!-- Bulk Action Toolbar -->
+    <div id="bulkActionsBar" class="d-none alert alert-light border py-2 px-3 my-2 d-flex align-items-center justify-content-between flex-wrap gap-2 shadow-sm">
+      <div class="d-flex align-items-center gap-2">
+        <span class="badge bg-primary text-white" id="selectedCountBadge">0 selected</span>
+        <span class="text-dark small fw-medium">Audit log entries selected for batch action</span>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="clearLogSelection()">
+          <i class="bi bi-x-circle me-1"></i>Clear Selection
+        </button>
+        <button type="button" class="btn btn-danger btn-sm" onclick="confirmBulkDelete()">
+          <i class="bi bi-trash3-fill me-1"></i>Delete Selected (<span id="deleteSelectedCountText">0</span>)
+        </button>
+      </div>
+    </div>
+
     <form class="row g-2 align-items-end mb-3" method="get">
-      <div class="col-md-4"><label class="form-label small mb-1" for="auditQuery">Search</label><input class="form-control form-control-sm" id="auditQuery" name="q" value="{{ query }}" placeholder="User, action, reference, or details"></div>
-      <div class="col-md-2"><label class="form-label small mb-1" for="auditAction">Action</label><input class="form-control form-control-sm" id="auditAction" name="action" value="{{ action }}" placeholder="e.g. DELETE" list="auditActionList"><datalist id="auditActionList"><option value="CREATE"><option value="UPDATE"><option value="DELETE"><option value="REVERSED"><option value="RESTORE"><option value="LOGIN"><option value="BACKUP"></datalist></div>
-      <div class="col-md-2"><label class="form-label small mb-1" for="auditStart">From</label><input class="form-control form-control-sm" id="auditStart" name="start" type="date" value="{{ start }}"></div>
-      <div class="col-md-2"><label class="form-label small mb-1" for="auditEnd">To</label><input class="form-control form-control-sm" id="auditEnd" name="end" type="date" value="{{ end }}"></div>
-      <div class="col-md-2 d-flex gap-2"><button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-funnel me-1"></i>Filter</button><a class="btn btn-outline-secondary btn-sm" href="{{ url_for('audit_logs') }}">Reset</a></div>
+      <div class="col-md-4">
+        <label class="form-label small mb-1" for="auditQuery">Search</label>
+        <input class="form-control form-control-sm" id="auditQuery" name="q" value="{{ query }}" placeholder="User, action, reference, or details">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small mb-1" for="auditAction">Action</label>
+        <input class="form-control form-control-sm" id="auditAction" name="action" value="{{ action }}" placeholder="e.g. DELETE" list="auditActionList">
+        <datalist id="auditActionList">
+          <option value="CREATE">
+          <option value="UPDATE">
+          <option value="DELETE">
+          <option value="REVERSED">
+          <option value="RESTORE">
+          <option value="LOGIN">
+          <option value="BACKUP">
+        </datalist>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small mb-1" for="auditStart">From</label>
+        <input class="form-control form-control-sm" id="auditStart" name="start" type="date" value="{{ start }}">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small mb-1" for="auditEnd">To</label>
+        <input class="form-control form-control-sm" id="auditEnd" name="end" type="date" value="{{ end }}">
+      </div>
+      <div class="col-md-2 d-flex gap-2">
+        <button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-funnel me-1"></i>Filter</button>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('audit_logs') }}">Reset</a>
+      </div>
     </form>
+
     <div class="table-responsive">
-      <table id="auditTable" class="table table-hover table-sm sortable">
+      <table id="auditTable" class="table table-hover table-sm align-middle sortable">
         <thead>
           <tr>
+            <th style="width: 40px;" class="text-center" data-no-sort>
+              <input type="checkbox" id="selectAllLogs" class="form-check-input" title="Select all logs" style="cursor: pointer;">
+            </th>
             <th data-sort>Timestamp</th>
             <th data-sort>User</th>
             <th data-sort>Action Type</th>
             <th data-sort>Reference</th>
             <th>Details</th>
+            <th class="text-end" style="width: 70px;" data-no-sort>Action</th>
           </tr>
         </thead>
         <tbody>
           {% for row in rows %}
           <tr>
+            <td class="text-center">
+              <input type="checkbox" name="log_id_cb" value="{{ row.id }}" class="form-check-input log-select-checkbox" style="cursor: pointer;">
+            </td>
             <td><span class="fw-semibold">{{ row.created_at|pretty_date }}</span></td>
             <td><span class="badge bg-secondary bg-opacity-10 text-secondary border px-2 py-1"><i class="bi bi-person me-1"></i>{{ row.username or 'SYSTEM' }}</span></td>
             <td>
@@ -56,9 +119,14 @@
             </td>
             <td><code>{{ row.reference or '-' }}</code></td>
             <td class="text-muted small">{{ row.details or '-' }}</td>
+            <td class="text-end">
+              <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2" title="Delete this log entry" onclick="confirmSingleDelete({{ row.id }}, '{{ (row.action or '')|escape }}')">
+                <i class="bi bi-trash3"></i>
+              </button>
+            </td>
           </tr>
           {% else %}
-          <tr><td colspan="5"><div class="empty-state"><i class="bi bi-shield-check"></i>No audit activity recorded yet.</div></td></tr>
+          <tr><td colspan="7"><div class="empty-state"><i class="bi bi-shield-check"></i>No audit activity recorded yet.</div></td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -72,4 +140,154 @@
     </div>
   </div>
 </div>
+
+<!-- Confirm Audit Log Delete Modal -->
+<div class="modal fade" id="deleteAuditModal" tabindex="-1" aria-labelledby="deleteAuditModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header bg-danger text-white">
+        <h5 class="modal-title" id="deleteAuditModalTitle">
+          <i class="bi bi-exclamation-triangle-fill me-2"></i>Confirm Audit Log Deletion
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2" id="deleteModalMessage">Are you sure you want to permanently delete the selected audit log entry(ies)?</p>
+        <div class="alert alert-warning py-2 mb-0 small">
+          <i class="bi bi-shield-exclamation me-1"></i>This action is permanent and will remove the records from the compliance activity trail.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-danger" onclick="submitAuditDelete()">
+          <i class="bi bi-trash3-fill me-1"></i>Permanently Delete
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Hidden Form for deletion request -->
+<form id="auditDeleteForm" method="post" action="{{ url_for('delete_audit_logs') }}" style="display:none;">
+  {{ csrf_input() }}
+  <input type="hidden" name="delete_all" id="inputDeleteAll" value="0">
+  <div id="hiddenLogIdsContainer"></div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const selectAllLogs = document.getElementById('selectAllLogs');
+const bulkActionsBar = document.getElementById('bulkActionsBar');
+const selectedCountBadge = document.getElementById('selectedCountBadge');
+const deleteSelectedCountText = document.getElementById('deleteSelectedCountText');
+const btnDeleteSelectedTop = document.getElementById('btnDeleteSelectedTop');
+const btnDeleteCountTop = document.getElementById('btnDeleteCountTop');
+const auditDeleteForm = document.getElementById('auditDeleteForm');
+const hiddenLogIdsContainer = document.getElementById('hiddenLogIdsContainer');
+const inputDeleteAll = document.getElementById('inputDeleteAll');
+const deleteModalMessage = document.getElementById('deleteModalMessage');
+
+function updateSelectionState() {
+  const checkboxes = document.querySelectorAll('.log-select-checkbox');
+  const checkedBoxes = Array.from(checkboxes).filter(cb => cb.checked);
+  const count = checkedBoxes.length;
+
+  if (selectedCountBadge) selectedCountBadge.textContent = count + ' selected';
+  if (deleteSelectedCountText) deleteSelectedCountText.textContent = count;
+  if (btnDeleteCountTop) btnDeleteCountTop.textContent = count;
+
+  if (count > 0) {
+    bulkActionsBar.classList.remove('d-none');
+    btnDeleteSelectedTop.classList.remove('d-none');
+  } else {
+    bulkActionsBar.classList.add('d-none');
+    btnDeleteSelectedTop.classList.add('d-none');
+  }
+
+  if (selectAllLogs) {
+    if (checkboxes.length > 0 && count === checkboxes.length) {
+      selectAllLogs.checked = true;
+      selectAllLogs.indeterminate = false;
+    } else if (count > 0) {
+      selectAllLogs.checked = false;
+      selectAllLogs.indeterminate = true;
+    } else {
+      selectAllLogs.checked = false;
+      selectAllLogs.indeterminate = false;
+    }
+  }
+}
+
+if (selectAllLogs) {
+  selectAllLogs.addEventListener('change', function() {
+    const isChecked = this.checked;
+    document.querySelectorAll('.log-select-checkbox').forEach(cb => {
+      cb.checked = isChecked;
+    });
+    updateSelectionState();
+  });
+}
+
+document.querySelectorAll('.log-select-checkbox').forEach(cb => {
+  cb.addEventListener('change', updateSelectionState);
+});
+
+function clearLogSelection() {
+  document.querySelectorAll('.log-select-checkbox').forEach(cb => {
+    cb.checked = false;
+  });
+  if (selectAllLogs) {
+    selectAllLogs.checked = false;
+    selectAllLogs.indeterminate = false;
+  }
+  updateSelectionState();
+}
+
+function confirmBulkDelete() {
+  const checkedBoxes = Array.from(document.querySelectorAll('.log-select-checkbox')).filter(cb => cb.checked);
+  if (checkedBoxes.length === 0) return;
+
+  inputDeleteAll.value = "0";
+  hiddenLogIdsContainer.innerHTML = "";
+  checkedBoxes.forEach(cb => {
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = "log_ids";
+    input.value = cb.value;
+    hiddenLogIdsContainer.appendChild(input);
+  });
+
+  deleteModalMessage.innerHTML = "Are you sure you want to permanently delete the <strong>" + checkedBoxes.length + " selected audit log entries</strong>?";
+  const modalEl = document.getElementById("deleteAuditModal");
+  bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+function confirmSingleDelete(id, action) {
+  inputDeleteAll.value = "0";
+  hiddenLogIdsContainer.innerHTML = "";
+  const input = document.createElement("input");
+  input.type = "hidden";
+  input.name = "log_ids";
+  input.value = id;
+  hiddenLogIdsContainer.appendChild(input);
+
+  deleteModalMessage.innerHTML = "Are you sure you want to permanently delete the audit log entry <strong>#" + id + " (" + action + ")</strong>?";
+  const modalEl = document.getElementById("deleteAuditModal");
+  bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+function confirmClearAllLogs() {
+  inputDeleteAll.value = "1";
+  hiddenLogIdsContainer.innerHTML = "";
+
+  deleteModalMessage.innerHTML = "<span class='text-danger fw-bold'>WARNING:</span> Are you sure you want to <strong>delete ALL audit logs</strong> in the entire system? This will clear the complete compliance log history.";
+  const modalEl = document.getElementById("deleteAuditModal");
+  bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+function submitAuditDelete() {
+  auditDeleteForm.submit();
+}
+</script>
 {% endblock %}

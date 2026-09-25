@@ -246,6 +246,7 @@ document.addEventListener("DOMContentLoaded", function () {
 			rows.forEach(function (r) { tb.appendChild(r); });
 		});
 	});
+	window.paginateCard = paginateCard;
 	function paginateCard(card) {
 		const table = card.querySelector("table");
 		if (!table) return;

@@ -429,8 +429,8 @@ def protect_post_requests():
 
     # Server-side RBAC: staff must not bypass admin URLs.
     admin_only_endpoints = {"delete_record_route", "restore_record", "users", "edit_user",
-                            "toggle_user", "delete_user", "audit_logs", "admin_backup", "admin_restore",
-                            "admin_gallery"}
+                            "toggle_user", "delete_user", "audit_logs", "delete_audit_logs",
+                            "admin_backup", "admin_restore", "admin_gallery"}
     if request.endpoint in admin_only_endpoints and normalize_role(session.get("role")) != "ADMIN":
         # Allow unauthenticated to fall through to login_required (redirect) rather than 403
         if "user_id" in session:
@@ -1383,6 +1383,11 @@ def dashboard():
     month_payments = conn.execute("SELECT COALESCE(SUM(amount),0) v FROM payments WHERE deleted=0 AND payment_date>=?", (month_start,)).fetchone()["v"]
     pending_invoices = conn.execute("""SELECT COUNT(*) v FROM sales s WHERE s.deleted=0 AND
         COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) < s.total_sale""").fetchone()["v"]
+    recent_customers = conn.execute("""SELECT c.id, c.name, c.phone, c.location, c.customer_type,
+        COALESCE(SUM(s.total_sale),0) + c.opening_balance total_purchases
+        FROM customers c LEFT JOIN sales s ON s.customer_id=c.id AND s.deleted=0
+        WHERE c.active=1
+        GROUP BY c.id ORDER BY c.id DESC LIMIT 5""").fetchall()
     saved_dashboard_images = conn.execute("SELECT slot,filename FROM dashboard_images").fetchall()
     conn.close()
     stats = dict(purchased=purchased,sold=sold,stock=stock,sales=float(sales),payments=float(payments),
@@ -1396,6 +1401,7 @@ def dashboard():
     return render_template("dashboard.html", stats=stats, recent=recent,
                            recent_purchases=recent_purchases, recent_payments=recent_payments,
                            recent_invoices=recent_invoices, outstanding_customers=outstanding_customers,
+                           recent_customers=recent_customers,
                            monthly_sales=monthly_sales, monthly_purchases=monthly_purchases,
                            dashboard_images=dashboard_images)
 
@@ -1718,7 +1724,6 @@ def payments():
     return render_template("payments.html", rows=rows, customers=customers,
                            outstanding_sales=outstanding_sales, today=date.today().isoformat(),
                            selected_customer_id=selected_customer_id,
-                           selected_sales_id=selected_sales_id)
                            selected_sales_id=selected_sales_id,
                            metrics=payment_metrics)
 
@@ -2856,6 +2861,48 @@ def audit_logs():
         )
     return render_template("audit_logs.html", rows=rows, reversals=reversals,
                            query=query, action=action, start=start, end=end)
+
+
+@app.route("/admin/audit-logs/delete", methods=["POST"])
+@login_required
+@admin_required
+def delete_audit_logs():
+    log_ids = request.form.getlist("log_ids")
+    single_id = request.form.get("log_id")
+    if single_id and single_id not in log_ids:
+        log_ids.append(single_id)
+    delete_all = request.form.get("delete_all") == "1"
+    valid_ids = []
+    for lid in log_ids:
+        try:
+            valid_ids.append(int(lid))
+        except (ValueError, TypeError):
+            pass
+    conn = db()
+    try:
+        count_deleted = 0
+        if delete_all:
+            cur = conn.execute("DELETE FROM audit_log")
+            count_deleted = cur.rowcount
+            conn.commit()
+            log_action("AUDIT LOG CLEARED", "ALL", f"cleared_by={actor_label()}; total_deleted={count_deleted}")
+            flash(f"All audit logs ({count_deleted} entries) cleared successfully.", "success")
+        elif valid_ids:
+            placeholders = ",".join("?" for _ in valid_ids)
+            cur = conn.execute(f"DELETE FROM audit_log WHERE id IN ({placeholders})", valid_ids)
+            count_deleted = cur.rowcount
+            conn.commit()
+            log_action("AUDIT LOG DELETED", f"{count_deleted} logs", f"total_deleted={count_deleted}; by={actor_label()}")
+            flash(f"Successfully deleted {count_deleted} audit log entry(ies).", "success")
+        else:
+            flash("No audit log entries were selected for deletion.", "warning")
+    except sqlite3.Error:
+        conn.rollback()
+        app.logger.exception("Audit log deletion failed")
+        flash("Audit log deletion failed.", "danger")
+    finally:
+        conn.close()
+    return redirect(request.referrer or url_for("audit_logs"))
 
 
 @app.route("/users/<int:user_id>/delete", methods=["POST"])

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Customers – ADUFARMS{% endblock %}
 {% block content %}
+<div class="ops-module ops-module-customers">
 <span id="new" class="anchor-target" aria-hidden="true"></span>
 {% if session.get('role') == 'ADMIN' %}
 <div class="d-flex justify-content-end mb-3">
@@ -71,20 +72,25 @@
 
 <div class="card">
   <div class="card-body">
-    <div class="panel-title">
-      <h5>Customer Accounts ({{ rows|length }})</h5>
+    <div class="panel-title d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <div class="d-flex align-items-center gap-2">
+        <span class="section-tag section-tag-customer"><i class="bi bi-people-fill me-1"></i> Customer Directory</span>
+        <h5 class="mb-0">Customer Accounts ({{ rows|length }})</h5>
+      </div>
       <input class="form-control form-control-sm" data-table-search="#customersTable" placeholder="Search customers..." style="max-width:280px">
     </div>
     <div class="table-responsive">
       <table id="customersTable" class="table table-hover align-middle">
         <thead>
           <tr>
+            <th style="width:48px;" class="text-center">#</th>
             <th>Customer</th>
             <th>Contact &amp; Location</th>
             <th>Type</th>
             <th class="text-end">Total Billed</th>
             <th class="text-end">Total Paid</th>
             <th class="text-end">Outstanding Debt</th>
+            <th class="text-center">Status</th>
             <th class="text-end">Actions</th>
           </tr>
         </thead>
@@ -92,14 +98,17 @@
           {% for row in rows %}
           {% set billed = row.total_sales + row.opening_balance %}
           {% set balance = billed - row.total_paid %}
-          <tr>
+          <tr class="customer-row-accent {{ row.name|customer_theme }}">
+            <td class="text-center">
+              <span class="table-seq-num">{{ loop.index }}</span>
+            </td>
             <td>
               <div class="customer-chip">
                 <span class="customer-avatar {{ row.name|customer_theme }}">
                   {{ row.name|customer_initials }}
                 </span>
                 <div>
-                  <strong>{{ row.name }}</strong>
+                  <strong class="text-dark">{{ row.name }}</strong>
                   {% if row.address %}
                   <small class="d-block text-muted">{{ row.address }}</small>
                   {% endif %}
@@ -122,6 +131,13 @@
                 <span class="fw-bold">{{ balance|money }}</span>
                 {{ balance|customer_balance_badge }}
               </div>
+            </td>
+            <td class="text-center">
+              {% if row.active == 0 %}
+                <span class="status-pill status-pill-reversed">Inactive</span>
+              {% else %}
+                <span class="status-pill status-pill-active"><i class="bi bi-check2 me-1"></i>Active</span>
+              {% endif %}
             </td>
             <td class="text-end">
               <div class="btn-group btn-group-sm">
@@ -154,7 +170,7 @@
           </tr>
           {% else %}
           <tr>
-            <td colspan="7">
+            <td colspan="9">
               <div class="empty-state">
                 <i class="bi bi-people"></i>
                 No customers have been registered yet.
@@ -166,5 +182,6 @@
       </table>
     </div>
   </div>
+</div>
 </div>
 {% endblock %}

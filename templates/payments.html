@@ -1,19 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Payment Tracking – ADUFARMS{% endblock %}
 {% block title %}Payment Tracking &amp; Collections – ADUFARMS{% endblock %}
 {% block content %}
+<div class="ops-module ops-module-payments">
 <span id="new" class="anchor-target" aria-hidden="true"></span>
 <div class="dashboard-heading">
   <div>
-    <h2>Payment Tracking &amp; Collections</h2>
-    <p>Record customer settlement receipts, verify Mobile Money and cash payments, and reconcile ledgers.</p>
     <span class="eyebrow text-uppercase text-muted fw-bold" style="font-size:.72rem;letter-spacing:.08em;">
       <i class="bi bi-wallet2 text-success me-1"></i> TREASURY &amp; SETTLEMENTS
     </span>
     <h2 class="mb-1">Payment Tracking &amp; Collections</h2>
     <p class="text-muted mb-0">Record customer settlement receipts, verify Mobile Money and cash payments, and reconcile sales ledgers.</p>
   </div>
-  <span class="status-badge status-paid"><i class="bi bi-shield-check"></i> VALIDATED PAYMENTS</span>
   <div class="d-flex align-items-center gap-2 flex-wrap">
     <span class="status-badge status-paid"><i class="bi bi-shield-check"></i> AUDITED TREASURY</span>
     <a href="#newPaymentCard" class="btn btn-primary btn-sm">
@@ -22,7 +19,6 @@
   </div>
 </div>
 
-<div class="card my-3">
 {% if metrics %}
 <div class="row g-3 my-2">
   <div class="col-6 col-xl-3">
@@ -100,13 +96,11 @@
     <form method="post" class="smart-form">
       {{ csrf_input() }}
       <div class="form-section">
-        <div class="form-section-title"><i class="bi bi-receipt"></i> Payment Information</div>
         <div class="form-section-title"><i class="bi bi-receipt"></i> Payment Details</div>
         <div class="row g-3">
-          <div class="col-md-4">
+          <div class="col-md-5">
             <label class="form-label">Customer Account <span class="required-mark">*</span></label>
             <select name="customer_id" id="paymentCustomer" class="form-select" required>
-              <option value="">Select customer</option>
               <option value="">-- Choose Customer --</option>
               {% for customer in customers %}
               <option value="{{ customer.id }}">{{ customer.name }}{% if customer.phone %} · {{ customer.phone }}{% endif %}</option>
@@ -114,15 +108,12 @@
             </select>
           </div>
           <div class="col-md-4">
-          <div class="col-md-5">
             <label class="form-label">Outstanding Sale Reference <span class="required-mark">*</span></label>
             <select name="sales_id" id="paymentSale" class="form-select" required disabled>
-            <select name="sales_id" id="paymentSale" class="form-select" required disabled onchange="onSaleSelectionChanged(this)">
               <option value="">Select customer first</option>
               {% for sale in outstanding_sales %}
-              <option value="{{ sale.sales_id }}" data-customer="{{ sale.customer_id }}" data-balance="{{ sale.total_sale - sale.paid }}">
               <option value="{{ sale.sales_id }}" data-customer="{{ sale.customer_id }}" data-balance="{{ '%.2f'|format(sale.total_sale - sale.paid) }}">
-                {{ sale.sales_id }} · {{ sale.total_sale|money }} (Due: {{ (sale.total_sale - sale.paid)|money }})
+                {{ sale.sales_id }} · {{ sale.customer_name }} · Due {{ (sale.total_sale - sale.paid)|money }}
               </option>
               {% endfor %}
             </select>
@@ -136,53 +127,34 @@
               </button>
             </div>
           </div>
-          <div class="col-md-2">
           <div class="col-md-3">
             <label class="form-label">Payment Date <span class="required-mark">*</span></label>
             <input type="date" name="payment_date" value="{{today}}" class="form-control" required>
           </div>
-          <div class="col-md-2">
-            <label class="form-label">Amount (GH₵) <span class="required-mark">*</span></label>
-            <input type="number" min="0.01" step="0.01" name="amount" class="form-control" placeholder="0.00" required>
           <div class="col-md-4">
             <label class="form-label">Amount Received (GH₵) <span class="required-mark">*</span></label>
             <input type="number" min="0.01" step="0.01" name="amount" id="paymentAmountInput" class="form-control" placeholder="0.00" required>
           </div>
-          <div class="col-md-3">
           <div class="col-md-4">
             <label class="form-label">Payment Channel <span class="required-mark">*</span></label>
             <select name="payment_method" class="form-select" required>
               <option value="Mobile Money">Mobile Money (MTN / Telecel)</option>
               <option value="Cash">Cash</option>
-              <option value="Bank Transfer">Bank Transfer / Cheque</option>
               <option value="Bank Transfer">Bank Transfer / Direct Wire</option>
               <option value="Cheque">Cheque</option>
               <option value="Other">Other</option>
             </select>
           </div>
-        </div>
-      </div>
-      <div class="form-section">
-        <div class="form-section-title"><i class="bi bi-credit-card"></i> Transaction Traceability</div>
-        <div class="row g-3">
-          <div class="col-md-6">
-            <label class="form-label">MoMo Transaction ID / Bank Reference</label>
           <div class="col-md-4">
             <label class="form-label">Transaction Reference / Proof</label>
             <input name="payment_reference" class="form-control" placeholder="e.g. MM-2026-99214 or Cheque #00412">
           </div>
-          <div class="col-md-6">
-            <label class="form-label">Internal Remarks</label>
-            <input name="notes" class="form-control" placeholder="e.g. 50% advance payment on Techiman yellow maize delivery">
           <div class="col-12">
             <label class="form-label">Internal Remarks / Settlement Notes</label>
             <input name="notes" class="form-control" placeholder="e.g. 50% advance on maize dispatch; full settlement cleared">
           </div>
         </div>
       </div>
-      <button class="btn btn-primary" type="submit">
-        <i class="bi bi-check2-circle me-1"></i> Record Payment
-      </button>
       <div class="pt-2">
         <button class="btn btn-primary" type="submit">
           <i class="bi bi-shield-check me-1"></i> Record &amp; Verify Payment
@@ -194,14 +166,10 @@
 
 <div class="card">
   <div class="card-body">
-    <div class="panel-title">
-      <h5>Payment History</h5>
-      <div class="table-tools mb-0">
-        <input class="form-control form-control-sm" data-table-search="#paymentsTable" placeholder="Search payments..." style="max-width:280px">
     <div class="panel-title d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
       <div>
         <h5 class="mb-0">Payment History &amp; Settlement Receipts ({{ rows|length }})</h5>
-        <small class="text-muted">Real-time ledger entries verified by treasury</small>
+        <small class="text-muted">Customer colors match the directory, sales, and invoices</small>
       </div>
       <div class="d-flex align-items-center gap-2 flex-wrap">
         <div class="btn-group btn-group-sm" role="group" aria-label="Filter by payment channel">
@@ -215,18 +183,9 @@
     </div>
 
     <div class="table-responsive">
-      <table id="paymentsTable" class="table table-hover align-middle">
       <table id="paymentsTable" class="table table-hover align-middle sortable">
         <thead>
           <tr>
-            <th>Payment ID</th>
-            <th>Sales Ref</th>
-            <th>Customer</th>
-            <th>Date</th>
-            <th class="text-end">Amount</th>
-            <th>Method</th>
-            <th>Reference</th>
-            <th>Operator</th>
             <th data-sort>Payment ID</th>
             <th data-sort>Sales Ref</th>
             <th data-sort>Customer</th>
@@ -240,21 +199,14 @@
         </thead>
         <tbody>
           {% for r in rows %}
-          <tr class="{% if r.deleted %}table-secondary text-muted{% endif %}">
-          <tr class="{% if r.deleted %}table-secondary text-muted{% endif %}" data-channel="{% if 'mobile' in (r.payment_method|lower) %}mobile{% elif 'cash' in (r.payment_method|lower) %}cash{% elif 'bank' in (r.payment_method|lower) %}bank{% else %}other{% endif %}">
+          <tr class="customer-row-accent {{ r.customer_name|customer_theme }}{% if r.deleted %} table-secondary text-muted{% endif %}" data-channel="{% if 'mobile' in (r.payment_method|lower) %}mobile{% elif 'cash' in (r.payment_method|lower) %}cash{% elif 'bank' in (r.payment_method|lower) %}bank{% else %}other{% endif %}">
             <td>
-              <strong>{{r.payment_id}}</strong>
-              {% if r.deleted %}<span class="status-badge status-reversed ms-1">REVERSED</span>{% endif %}
               <span class="payment-id-pill">
                 <i class="bi bi-receipt-cutoff text-success me-1"></i>{{ r.payment_id }}
               </span>
-              {% if r.deleted %}
-              <span class="badge bg-danger text-white ms-1">REVERSED</span>
-              {% endif %}
+              {% if r.deleted %}<span class="status-badge status-reversed ms-1">REVERSED</span>{% endif %}
             </td>
             <td>
-              <a href="{{url_for('transaction_history',transaction_id=r.sales_id)}}">
-                <code>{{r.sales_id}}</code>
               <a href="{{ url_for('transaction_history', transaction_id=r.sales_id) }}" class="sales-link-pill" title="View sales order">
                 <i class="bi bi-cart3 me-1"></i>{{ r.sales_id }}
               </a>
@@ -264,46 +216,31 @@
                 <span class="customer-avatar {{ r.customer_name|customer_theme }}">
                   {{ r.customer_name|customer_initials }}
                 </span>
-                <strong>{{ r.customer_name }}</strong>
                 <div>
-                  <div class="customer-name-text fw-semibold">{{ r.customer_name }}</div>
+                  <div class="customer-name-text">{{ r.customer_name }}</div>
                   {% if r.phone %}
                   <small class="text-muted d-block">{{ r.phone }}</small>
                   {% endif %}
                 </div>
               </div>
             </td>
-            <td>{{r.payment_date|pretty_date}}</td>
-            <td class="text-end text-success fw-bold">{{r.amount|money}}</td>
             <td>
-              <span class="badge bg-light text-dark border px-2 py-1">
-                <i class="bi bi-{% if 'Mobile' in r.payment_method %}phone text-warning{% elif 'Cash' in r.payment_method %}cash text-success{% elif 'Bank' in r.payment_method %}bank text-primary{% else %}wallet2 text-secondary{% endif %} me-1"></i>{{r.payment_method}}
               <span class="text-nowrap text-dark">
                 <i class="bi bi-calendar-event text-muted me-1"></i>{{ r.payment_date|pretty_date }}
               </span>
             </td>
-            <td><small class="text-muted">{{r.payment_reference or '-'}}</small></td>
-            <td><small>{{r.staff_user}}</small></td>
             <td class="text-end">
               <span class="payment-amount-cell">+{{ r.amount|money }}</span>
             </td>
             <td>
               {% if 'mobile' in (r.payment_method|lower) %}
-              <span class="badge-channel-momo">
-                <i class="bi bi-phone-fill me-1"></i>Mobile Money
-              </span>
+              <span class="badge-channel-momo"><i class="bi bi-phone-fill me-1"></i>Mobile Money</span>
               {% elif 'cash' in (r.payment_method|lower) %}
-              <span class="badge-channel-cash">
-                <i class="bi bi-cash-stack me-1"></i>Cash
-              </span>
+              <span class="badge-channel-cash"><i class="bi bi-cash-stack me-1"></i>Cash</span>
               {% elif 'bank' in (r.payment_method|lower) %}
-              <span class="badge-channel-bank">
-                <i class="bi bi-bank me-1"></i>Bank Transfer
-              </span>
+              <span class="badge-channel-bank"><i class="bi bi-bank me-1"></i>Bank Transfer</span>
               {% else %}
-              <span class="badge-channel-other">
-                <i class="bi bi-wallet2 me-1"></i>{{ r.payment_method }}
-              </span>
+              <span class="badge-channel-other"><i class="bi bi-wallet2 me-1"></i>{{ r.payment_method }}</span>
               {% endif %}
             </td>
             <td>
@@ -322,9 +259,8 @@
             </td>
             <td class="text-end">
               <div class="btn-group btn-group-sm">
-                <a class="btn btn-outline-dark" href="{{url_for('invoice', transaction_id=r.sales_id)}}" title="Generate invoice">
                 <button type="button" class="btn btn-outline-success" title="Print Official Receipt"
-                        onclick="openReceiptModal('{{ r.payment_id }}', '{{ r.sales_id }}', '{{ r.customer_name|escape }}', '{{ r.phone or '' }}', '{{ r.payment_date|pretty_date }}', '{{ r.amount|money }}', '{{ r.payment_method }}', '{{ r.payment_reference or 'N/A' }}', '{{ r.staff_user }}', '{{ (r.notes or '')|escape }}')">
+                        onclick="openReceiptModal({{ r.payment_id|tojson }}, {{ r.sales_id|tojson }}, {{ r.customer_name|tojson }}, {{ (r.phone or '')|tojson }}, {{ (r.payment_date|pretty_date)|tojson }}, {{ (r.amount|money)|tojson }}, {{ r.payment_method|tojson }}, {{ (r.payment_reference or 'N/A')|tojson }}, {{ r.staff_user|tojson }}, {{ (r.notes or '')|tojson }})">
                   <i class="bi bi-printer me-1"></i>Receipt
                 </button>
                 <a class="btn btn-outline-primary" href="{{ url_for('transaction_history', transaction_id=r.sales_id) }}" title="View Sales History">
@@ -334,11 +270,9 @@
                   <i class="bi bi-receipt"></i>
                 </a>
                 {% if session.get('role') == 'ADMIN' %}
-                <a class="btn btn-outline-secondary" href="{{url_for('edit_payment',payment_id=r.id)}}" title="Edit payment">
                 <a class="btn btn-outline-secondary" href="{{ url_for('edit_payment', payment_id=r.id) }}" title="Edit payment">
                   <i class="bi bi-pencil"></i>
                 </a>
-                <form class="d-inline" method="post" action="{{url_for('reverse_record_route',table='payments',record_id=r.id)}}" onsubmit="return confirm('Reverse this payment?');">
                 <form class="d-inline" method="post" action="{{ url_for('reverse_record_route', table='payments', record_id=r.id) }}" onsubmit="return confirm('Reverse payment {{ r.payment_id }}? This creates an audit log entry.');">
                   {{ csrf_input() }}
                   <button class="btn btn-outline-warning" title="Reverse payment">
@@ -347,16 +281,11 @@
                 </form>
                 <button type="button" class="btn btn-outline-danger" title="Delete transaction"
                         data-bs-toggle="modal" data-bs-target="#deleteTransactionModal"
-                        data-delete-url="{{url_for('delete_record_route',table='payments',record_id=r.id)}}"
-                        data-delete-id="{{r.payment_id}}"
                         data-delete-url="{{ url_for('delete_record_route', table='payments', record_id=r.id) }}"
                         data-delete-id="{{ r.payment_id }}"
                         data-delete-type="Payment"
-                        data-delete-party="{{r.customer_name}}"
                         data-delete-party="{{ r.customer_name }}"
                         data-delete-quantity="-"
-                        data-delete-amount="{{r.amount|money}}"
-                        data-delete-date="{{r.payment_date|pretty_date}}">
                         data-delete-amount="{{ r.amount|money }}"
                         data-delete-date="{{ r.payment_date|pretty_date }}">
                   <i class="bi bi-trash3"></i>
@@ -370,10 +299,7 @@
             <td colspan="9">
               <div class="empty-state">
                 <i class="bi bi-wallet2"></i>
-                No payments recorded yet.<br>
-                <a href="{{ url_for('payments') }}" class="btn btn-sm btn-primary mt-2">Record the first payment</a>
-                <i class="bi bi-wallet2 fs-2 text-muted"></i>
-                <p class="mt-2">No payments recorded yet.</p>
+                <p class="mt-2 mb-2">No payments recorded yet.</p>
                 <a href="#newPaymentCard" class="btn btn-sm btn-primary">Record the first payment</a>
               </div>
             </td>
@@ -396,8 +322,8 @@
     </div>
   </div>
 </div>
+</div>
 
-<!-- Official Payment Receipt Modal -->
 <div class="modal fade" id="paymentReceiptModal" tabindex="-1" aria-labelledby="receiptModalTitle" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-lg">
     <div class="modal-content">
@@ -426,7 +352,6 @@
               </div>
             </div>
           </div>
-
           <div class="row g-3 mb-4">
             <div class="col-md-6">
               <small class="text-muted text-uppercase fw-semibold" style="font-size:.7rem;">Received From (Customer)</small>
@@ -435,14 +360,13 @@
             </div>
             <div class="col-md-3">
               <small class="text-muted text-uppercase fw-semibold" style="font-size:.7rem;">Payment Date</small>
-              <div id="receiptDateText" class="fw-semibold text-dark mt-1">23 September 2026</div>
+              <div id="receiptDateText" class="fw-semibold text-dark mt-1">—</div>
             </div>
             <div class="col-md-3">
               <small class="text-muted text-uppercase fw-semibold" style="font-size:.7rem;">Sales Reference</small>
               <div id="receiptSalesIdText" class="font-monospace fw-semibold text-primary mt-1">ADU-SAL-...</div>
             </div>
           </div>
-
           <table class="table receipt-table mb-4">
             <thead>
               <tr>
@@ -459,14 +383,13 @@
                   <small id="receiptRemarksText" class="text-muted">Maize grain delivery settlement</small>
                 </td>
                 <td><span id="receiptMethodText" class="fw-medium">Mobile Money</span></td>
-                <td><code id="receiptRefText" class="fw-semibold text-dark">MM-3939</code></td>
+                <td><code id="receiptRefText" class="fw-semibold text-dark">—</code></td>
                 <td class="text-end">
-                  <span id="receiptAmountText" class="fs-5 fw-bold text-success">+GH₵ 5,000.00</span>
+                  <span id="receiptAmountText" class="fs-5 fw-bold text-success">GH₵0.00</span>
                 </td>
               </tr>
             </tbody>
           </table>
-
           <div class="d-flex justify-content-between align-items-end pt-3 border-top border-2 border-dashed">
             <div>
               <small class="text-muted d-block">Authorized Treasury Officer</small>
@@ -475,7 +398,7 @@
             </div>
             <div class="text-end">
               <small class="text-muted d-block">Total Settlement Cleared</small>
-              <strong id="receiptTotalText" class="fs-4 text-success fw-bold">GH₵ 5,000.00</strong>
+              <strong id="receiptTotalText" class="fs-4 text-success fw-bold">GH₵0.00</strong>
             </div>
           </div>
         </div>
@@ -493,54 +416,15 @@
 
 {% block scripts %}
 <script>
-const customerSelect = document.getElementById('paymentCustomer');
-const saleSelect = document.getElementById('paymentSale');
-const initialCustomer = {{ selected_customer_id|default('', true)|tojson }};
-const initialSale = {{ selected_sales_id|default('', true)|tojson }};
+const paymentSale = document.getElementById('paymentSale');
 let currentSaleBalance = 0;
 
-function filterSales(preserveSelection=false){
-  const customer = customerSelect.value;
-  saleSelect.disabled = !customer;
-  if(!preserveSelection) saleSelect.value = '';
-  if(!preserveSelection) {
-    saleSelect.value = '';
-    onSaleSelectionChanged(saleSelect);
-  }
-  let matchCount = 0;
-  let firstMatch = null;
-  Array.from(saleSelect.options).forEach(option => {
-    if(!option.value) return;
-    option.hidden = option.dataset.customer !== customer;
-    const matches = option.dataset.customer === customer;
-    option.hidden = !matches;
-    if(matches) {
-      matchCount++;
-      if(!firstMatch) firstMatch = option.value;
-    }
-  });
-  if(!customer) saleSelect.options[0].textContent = 'Select customer first';
-  else saleSelect.options[0].textContent = 'Select outstanding sale';
-  if(!customer) {
-    saleSelect.options[0].textContent = 'Select customer first';
-  } else if(matchCount === 0) {
-    saleSelect.options[0].textContent = 'No outstanding balance for this customer';
-  } else {
-    saleSelect.options[0].textContent = '-- Select outstanding sale (' + matchCount + ' due) --';
-    // If only 1 sale is outstanding, auto-select it for operator convenience
-    if(matchCount === 1 && !preserveSelection && firstMatch) {
-      saleSelect.value = firstMatch;
-      onSaleSelectionChanged(saleSelect);
-    }
-  }
-}
-
-customerSelect?.addEventListener('change', filterSales);
 function onSaleSelectionChanged(sel) {
-  const opt = sel.options[sel.selectedIndex];
+  const opt = sel && sel.options ? sel.options[sel.selectedIndex] : null;
   const banner = document.getElementById('saleBalanceBanner');
   const amountEl = document.getElementById('saleBalanceAmount');
-  if(!opt || !opt.value || !opt.dataset.balance) {
+  if (!banner || !amountEl) return;
+  if (!opt || !opt.value || !opt.dataset.balance) {
     banner.classList.add('d-none');
     currentSaleBalance = 0;
     return;
@@ -551,43 +435,28 @@ function onSaleSelectionChanged(sel) {
 }
 
 function fillFullPayment() {
-  if(currentSaleBalance > 0) {
+  if (currentSaleBalance > 0) {
     document.getElementById('paymentAmountInput').value = currentSaleBalance.toFixed(2);
   }
 }
 
-customerSelect?.addEventListener('change', () => filterSales(false));
-if(initialCustomer){
-  customerSelect.value = String(initialCustomer);
-  filterSales(true);
-  if(initialSale) saleSelect.value = initialSale;
-  if(initialSale) {
-    saleSelect.value = initialSale;
-    onSaleSelectionChanged(saleSelect);
-  }
-}
+paymentSale?.addEventListener('change', function () { onSaleSelectionChanged(this); });
+setTimeout(function () { if (paymentSale) onSaleSelectionChanged(paymentSale); }, 0);
 
-// Channel quick filter tabs
 document.querySelectorAll('.table-filter-btn').forEach(btn => {
   btn.addEventListener('click', function() {
     document.querySelectorAll('.table-filter-btn').forEach(b => b.classList.remove('active'));
     this.classList.add('active');
     const filter = this.dataset.channelFilter;
-    const rows = document.querySelectorAll('#paymentsTable tbody tr');
-    rows.forEach(row => {
-      if(filter === 'all') {
-        row.hidden = false;
-      } else {
-        const rowChannel = row.dataset.channel;
-        row.hidden = rowChannel !== filter;
-      }
+    document.querySelectorAll('#paymentsTable tbody tr').forEach(row => {
+      if (filter === 'all' || !row.dataset.channel) row.hidden = false;
+      else row.hidden = row.dataset.channel !== filter;
     });
-    const card = document.getElementById('paymentsTable').closest('.card');
-    if(card && typeof paginateCard === 'function') paginateCard(card);
+    const card = document.getElementById('paymentsTable')?.closest('.card');
+    if (card && typeof paginateCard === 'function') paginateCard(card);
   });
 });
 
-// Receipt Modal Handler
 function openReceiptModal(payId, saleId, customerName, phone, payDate, amount, method, ref, cashier, remarks) {
   document.getElementById('receiptIdText').textContent = payId;
   document.getElementById('receiptCustomerText').textContent = customerName;
@@ -600,10 +469,8 @@ function openReceiptModal(payId, saleId, customerName, phone, payDate, amount, m
   document.getElementById('receiptRefText').textContent = ref ? ref : 'N/A';
   document.getElementById('receiptCashierText').textContent = cashier;
   document.getElementById('receiptRemarksText').textContent = remarks ? remarks : 'Payment verified and posted to sales ledger.';
-
   const modalEl = document.getElementById('paymentReceiptModal');
-  const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
-  modal.show();
+  bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
 
 function printReceiptContent() {
@@ -617,10 +484,7 @@ function printReceiptContent() {
   printWindow.document.write('</body></html>');
   printWindow.document.close();
   printWindow.focus();
-  setTimeout(() => {
-    printWindow.print();
-    printWindow.close();
-  }, 300);
+  setTimeout(() => { printWindow.print(); printWindow.close(); }, 300);
 }
 </script>
 {% endblock %}

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Customer / Sales – ADUFARMS{% endblock %}
 {% block content %}
+<div class="ops-module ops-module-sales">
 <span id="new" class="anchor-target" aria-hidden="true"></span>
 {% if related_purchase %}
 <div class="alert alert-info d-flex align-items-start gap-3" role="status">
@@ -25,7 +26,7 @@
     <form method="post" class="smart-form">
       {{ csrf_input() }}
       {% if selected_customer %}
-      <div class="alert alert-success d-flex align-items-center gap-3 mb-3 p-3 border-2" role="status">
+      <div class="alert customer-select-banner {{ selected_customer.name|customer_theme }} d-flex align-items-center gap-3 mb-3 p-3 border-2" role="status">
         <span class="customer-avatar customer-avatar-lg {{ selected_customer.name|customer_theme }}">{{ selected_customer.name|customer_initials }}</span>
         <div class="flex-grow-1">
           <div class="d-flex align-items-center gap-2 mb-1">
@@ -100,8 +101,11 @@
 
 <div class="card">
   <div class="card-body">
-    <div class="panel-title">
-      <h5>Recent sales</h5>
+    <div class="panel-title d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <div class="d-flex align-items-center gap-2">
+        <span class="section-tag section-tag-sales"><i class="bi bi-cart-fill me-1"></i> Sales &amp; Dispatch</span>
+        <h5 class="mb-0">Recent Sales ({{ rows|length }})</h5>
+      </div>
       <div class="table-tools mb-0">
         <input class="form-control form-control-sm" data-table-search="#salesTable" placeholder="Search sales...">
       </div>
@@ -110,26 +114,33 @@
       <table id="salesTable" class="table table-hover align-middle">
         <thead>
           <tr>
+            <th style="width:48px;" class="text-center">#</th>
             <th>Sales ID</th>
             <th>Invoice</th>
             <th>Date</th>
             <th>Customer</th>
+            <th>Product</th>
             <th>Phone</th>
             <th class="text-end">Quantity (KG)</th>
             <th class="text-end">Total</th>
             <th class="text-end">Paid</th>
             <th class="text-end">Balance</th>
-            <th>Status</th>
+            <th class="text-center">Status</th>
             <th class="text-end">Actions</th>
           </tr>
         </thead>
         <tbody>
           {% for r in rows %}
           {% set balance = r.total_sale - r.paid %}
-          <tr class="{% if r.deleted %}table-secondary text-muted{% endif %}">
+          <tr class="customer-row-accent {{ r.customer_name|customer_theme }}{% if r.deleted %} table-secondary text-muted{% endif %}">
+            <td class="text-center">
+              <span class="table-seq-num">{{ loop.index }}</span>
+            </td>
             <td>
-              <a href="{{url_for('transaction_history',transaction_id=r.sales_id)}}"><strong>{{r.sales_id}}</strong></a>
-              {% if r.deleted %}<span class="status-badge status-reversed ms-1">REVERSED</span>{% endif %}
+              <a href="{{url_for('transaction_history',transaction_id=r.sales_id)}}" class="sales-id-pill">
+                <i class="bi bi-cart3 me-1"></i>{{r.sales_id}}
+              </a>
+              {% if r.deleted %}<span class="status-pill status-pill-reversed ms-1">REVERSED</span>{% endif %}
             </td>
             <td>
               <a href="{{url_for('invoice',transaction_id=r.sales_id)}}" title="Open invoice">
@@ -142,23 +153,26 @@
                 <span class="customer-avatar {{ r.customer_name|customer_theme }}">
                   {{ r.customer_name|customer_initials }}
                 </span>
-                <strong>{{ r.customer_name }}</strong>
+                <strong class="text-dark">{{ r.customer_name }}</strong>
               </div>
+            </td>
+            <td>
+              <span class="product-tag-pill"><i class="bi bi-tag-fill me-1"></i>Maize Supply</span>
             </td>
             <td>{{r.phone or '-'}}</td>
             <td class="text-end fw-bold">{{"{:,.2f}".format(r.quantity_kg)}} KG</td>
             <td class="text-end fw-bold">{{r.total_sale|money}}</td>
             <td class="text-end text-success fw-bold">{{r.paid|money}}</td>
             <td class="text-end fw-bold">{{balance|money}}</td>
-            <td>
+            <td class="text-center">
               {% if r.paid > r.total_sale + 0.005 %}
-                <span class="status-badge status-overpaid">OVERPAID</span>
+                <span class="status-pill status-pill-overpaid"><i class="bi bi-plus-circle-fill me-1"></i>Overpaid</span>
               {% elif balance <= 0.005 %}
-                <span class="status-badge status-paid">PAID</span>
+                <span class="status-pill status-pill-paid"><i class="bi bi-check-circle-fill me-1"></i>Paid</span>
               {% elif r.paid > 0 %}
-                <span class="status-badge status-part">PART PAYMENT</span>
+                <span class="status-pill status-pill-pending"><i class="bi bi-clock-fill me-1"></i>Pending</span>
               {% else %}
-                <span class="status-badge status-unpaid">UNPAID</span>
+                <span class="status-pill status-pill-unpaid"><i class="bi bi-exclamation-circle-fill me-1"></i>Unpaid</span>
               {% endif %}
             </td>
             <td class="text-end">
@@ -193,7 +207,7 @@
           </tr>
           {% else %}
           <tr>
-            <td colspan="11">
+            <td colspan="13">
               <div class="empty-state">
                 <i class="bi bi-cart3"></i>
                 No sales recorded yet.<br>
@@ -206,6 +220,7 @@
       </table>
     </div>
   </div>
+</div>
 </div>
 {% endblock %}
 {% block scripts %}
