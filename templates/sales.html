@@ -104,12 +104,25 @@
     <div class="panel-title d-flex justify-content-between align-items-center flex-wrap gap-2">
       <div class="d-flex align-items-center gap-2">
         <span class="section-tag section-tag-sales"><i class="bi bi-cart-fill me-1"></i> Sales &amp; Dispatch</span>
-        <h5 class="mb-0">Recent Sales ({{ rows|length }})</h5>
+        <h5 class="mb-0">Recent Sales ({{ total_sales }})</h5>
       </div>
       <div class="table-tools mb-0">
         <input class="form-control form-control-sm" data-table-search="#salesTable" placeholder="Search sales...">
       </div>
     </div>
+    {% if page_count > 1 %}
+    <div class="d-flex justify-content-between align-items-center mt-3 mb-2 text-muted small">
+      <span>Page {{ page }} of {{ page_count }}</span>
+      <div class="btn-group btn-group-sm">
+        {% if page > 1 %}
+        <a class="btn btn-outline-secondary" href="{{ url_for('sales', page=page-1) }}">Previous</a>
+        {% endif %}
+        {% if page < page_count %}
+        <a class="btn btn-outline-secondary" href="{{ url_for('sales', page=page+1) }}">Next</a>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
     <div class="table-responsive">
       <table id="salesTable" class="table table-hover align-middle">
         <thead>

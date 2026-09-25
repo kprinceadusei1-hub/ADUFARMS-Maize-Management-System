@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file, abort
+from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file, abort, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 from datetime import datetime, date, timedelta
@@ -56,12 +56,95 @@ app.config["DATABASE"] = str(DB_PATH)
 
 ALLOWED_PROFILE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 ALLOWED_PROFILE_MIMES = {"image/jpeg", "image/png", "image/webp"}
-ALLOWED_DASHBOARD_SLOTS = {"hero", "inventory", "delivery"}
-DASHBOARD_IMAGE_DEFAULTS = {
-    "hero": "images/branding/maize-harvest.webp",
-    "inventory": "images/dashboard/warehouse.webp",
-    "delivery": "images/modules/sales.webp",
+DASHBOARD_SLOT_ALIASES = {
+    "delivery": "sales",
+    "sales": "sales",
+    "inventory": "inventory",
+    "inventory_banner": "inventory",
+    "stock_inventory": "inventory",
+    "invoice_module": "invoice",
+    "sales_module": "sales",
+    "purchase_module": "purchases",
+    "reports_module": "reports",
+    "user_management": "users",
 }
+DASHBOARD_IMAGE_DEFAULTS = {
+    "hero": "images/branding/maize-farmers.webp",
+    "inventory": "images/dashboard/warehouse.webp",
+    "stock": "images/modules/stock.webp",
+    "sales": "images/modules/sales.webp",
+    "purchases": "images/modules/purchase.webp",
+    "customers": "images/modules/search.jpg",
+    "payments": "images/modules/payment.webp",
+    "invoice": "images/modules/invoice.jpg",
+    "reports": "images/branding/maize-harvest.webp",
+    "assistant": "images/branding/maize-harvest.jpg",
+    "profile": "images/branding/d11d7134-86b8-4264-b7b1-79e5be58a001.png",
+    "users": "images/branding/adufarms-logo.jpg",
+    "audit_logs": "images/dashboard/warehouse.jpg",
+    "deleted_records": "images/modules/payment.jpg",
+}
+DASHBOARD_IMAGE_SLOT_ORDER = [
+    ("hero", "Dashboard overview", "Main banner image for the executive dashboard."),
+    ("inventory", "Stock & Inventory", "Matches the warehouse and live stock management view."),
+    ("stock", "Stock module", "Controls the main stock page banner."),
+    ("sales", "Sales", "Matches the sales and customer order workflow."),
+    ("purchases", "Purchases", "Controls supplier intake and purchasing pages."),
+    ("customers", "Customers", "Controls the customer directory banner."),
+    ("payments", "Payments", "Controls the payment tracking banner."),
+    ("invoice", "Invoices", "Controls the invoice module banner."),
+    ("reports", "Reports", "Powers the analytics and reports workspace."),
+    ("assistant", "Assistant", "Sets the agribusiness assistant and guidance area."),
+    ("profile", "Profile", "User account, profile and security imagery."),
+    ("users", "User management", "Controls admin team and access management pages."),
+    ("audit_logs", "Audit logs", "Security and operational activity tracking page."),
+    ("deleted_records", "Recovery & archive", "Deleted records and restoration imagery."),
+]
+ALLOWED_DASHBOARD_SLOTS = set(DASHBOARD_IMAGE_DEFAULTS)
+PAGE_BANNER_SLOT_MAP = {
+    "dashboard": "hero",
+    "inventory": "inventory",
+    "stock": "stock",
+    "sales": "sales",
+    "purchases": "purchases",
+    "customers": "customers",
+    "payments": "payments",
+    "invoice": "invoice",
+    "reports": "reports",
+    "assistant": "assistant",
+    "profile": "profile",
+    "users": "users",
+    "audit_logs": "audit_logs",
+    "deleted_records": "deleted_records",
+}
+
+
+@app.context_processor
+def inject_dashboard_images():
+    conn = None
+    try:
+        conn = db()
+        rows = conn.execute("SELECT slot, filename FROM dashboard_images").fetchall()
+    except Exception:
+        rows = []
+    finally:
+        if conn is not None:
+            conn.close()
+
+    dashboard_images = dict(DASHBOARD_IMAGE_DEFAULTS)
+    for row in rows:
+        slot_name = DASHBOARD_SLOT_ALIASES.get(row["slot"], row["slot"])
+        if slot_name in dashboard_images:
+            dashboard_images[slot_name] = row["filename"]
+
+    def module_banner_slot_for(endpoint_name):
+        return PAGE_BANNER_SLOT_MAP.get(endpoint_name, "hero")
+
+    return {
+        "dashboard_images": dashboard_images,
+        "dashboard_image_slots": DASHBOARD_IMAGE_SLOT_ORDER,
+        "module_banner_slot_for": module_banner_slot_for,
+    }
 
 
 def db():
@@ -319,6 +402,16 @@ def init_db():
     conn.execute("UPDATE invoices SET sales_id=(SELECT s.sales_id FROM sales s WHERE s.transaction_id=invoices.transaction_id) WHERE sales_id IS NULL OR sales_id='' ")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_sales_id ON invoices(sales_id)")
     conn.execute("UPDATE sales SET invoice_number=(SELECT i.invoice_number FROM invoices i WHERE i.transaction_id=sales.transaction_id) WHERE invoice_number IS NULL OR invoice_number='' ")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sales_deleted_customer ON sales(deleted, customer_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sales_deleted_transaction ON sales(deleted, transaction_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sales_deleted_date ON sales(deleted, sale_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_purchases_deleted_date ON purchases(deleted, purchase_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_customers_active_name ON customers(active, name)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_customers_active_phone ON customers(active, phone)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_payments_deleted_transaction ON payments(deleted, transaction_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_payments_deleted_date ON payments(deleted, payment_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_invoices_deleted_transaction ON invoices(deleted, transaction_id)")
+    conn.execute("ANALYZE")
     payment_rows = conn.execute("SELECT id,payment_date,transaction_id FROM payments WHERE payment_id IS NULL OR payment_id='' ORDER BY payment_date,id").fetchall()
     for row in payment_rows:
         try:
@@ -659,17 +752,17 @@ def admin_required(f):
 
 
 COMPANY = {
-    "legal_name": "ADUFARMS",
-    "service_line": "Maize Supply & Delivery Services",
-    "tagline": "Growing Better. Distributing Smarter.",
-    "document_note": "Professional maize supply and delivery invoice",
+    "legal_name": "PRINCE",
+    "service_line": "Maize Trading & Distribution",
+    "tagline": "Fresh stock. Trusted service. Better business.",
+    "document_note": "Professional maize trading and delivery invoice",
     "momo_label": "Mobile Money",
-    "momo_number": "054 734 6840",
-    "momo_name": "Agnes Adomah",
-    "bank_name": "Republic Bank",
-    "bank_account": "0070910682301",
-    "bank_account_name": "Kyeremeh Bismark",
-    "bank_branch": "Legon Branch",
+    "momo_number": "024 000 0000",
+    "momo_name": "PRINCE Business",
+    "bank_name": "GCB Bank",
+    "bank_account": "0000000000",
+    "bank_account_name": "PRINCE BUSINESS",
+    "bank_branch": "Main Branch",
 }
 
 
@@ -1333,28 +1426,94 @@ def dashboard():
     conn = db()
     today = date.today().isoformat()
     month_start = date.today().replace(day=1).isoformat()
-    sales = conn.execute("SELECT COALESCE(SUM(total_sale),0) v FROM sales WHERE deleted=0").fetchone()["v"]
-    payments = conn.execute("SELECT COALESCE(SUM(amount),0) v FROM payments WHERE deleted=0").fetchone()["v"]
-    opening_balances = conn.execute("SELECT COALESCE(SUM(opening_balance),0) v FROM customers WHERE active=1").fetchone()["v"]
-    purchase_cost = conn.execute("SELECT COALESCE(SUM(total_purchase_cost),0) v FROM purchases WHERE deleted=0").fetchone()["v"]
-    transport = conn.execute("SELECT COALESCE(SUM(transport_cost),0) v FROM purchases WHERE deleted=0").fetchone()["v"]
-    other = conn.execute("SELECT COALESCE(SUM(other_expenses),0) v FROM purchases WHERE deleted=0").fetchone()["v"]
-    customers = conn.execute("SELECT COUNT(*) v FROM customers WHERE active=1").fetchone()["v"]
-    transactions = conn.execute("SELECT COUNT(*) v FROM sales WHERE deleted=0").fetchone()["v"]
-    paid = conn.execute("""SELECT COUNT(*) v FROM sales s WHERE s.deleted=0 AND
-        COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) >= s.total_sale""").fetchone()["v"]
-    part = conn.execute("""SELECT COUNT(*) v FROM sales s WHERE s.deleted=0 AND
-        COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) > 0
-        AND COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) < s.total_sale""").fetchone()["v"]
-    unpaid = transactions - paid - part
-    sale_outstanding = conn.execute("""SELECT COALESCE(SUM(CASE WHEN s.total_sale -
-        COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) > 0.005
-        THEN s.total_sale - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0)
-        ELSE 0 END),0) v FROM sales s WHERE s.deleted=0""").fetchone()["v"]
+
+    summary_row = conn.execute("""
+        WITH sales_summary AS (
+            SELECT
+                COALESCE(SUM(CASE WHEN deleted=0 THEN total_sale ELSE 0 END), 0) AS sales_total,
+                COUNT(CASE WHEN deleted=0 THEN 1 END) AS transactions_count,
+                COALESCE(SUM(CASE WHEN deleted=0 AND sale_date=? THEN total_sale ELSE 0 END), 0) AS today_sales,
+                COALESCE(SUM(CASE WHEN deleted=0 AND sale_date>=? THEN total_sale ELSE 0 END), 0) AS month_sales
+            FROM sales
+        ),
+        payments_summary AS (
+            SELECT
+                COALESCE(SUM(CASE WHEN deleted=0 THEN amount ELSE 0 END), 0) AS payments_total,
+                COALESCE(SUM(CASE WHEN deleted=0 AND payment_date=? THEN amount ELSE 0 END), 0) AS today_payments,
+                COALESCE(SUM(CASE WHEN deleted=0 AND payment_date>=? THEN amount ELSE 0 END), 0) AS month_payments
+            FROM payments
+        ),
+        purchases_summary AS (
+            SELECT
+                COALESCE(SUM(CASE WHEN deleted=0 THEN quantity_received_kg ELSE 0 END), 0) AS purchased_kg,
+                COALESCE(SUM(CASE WHEN deleted=0 THEN total_purchase_cost ELSE 0 END), 0) AS purchase_cost_total,
+                COALESCE(SUM(CASE WHEN deleted=0 THEN transport_cost ELSE 0 END), 0) AS transport_total,
+                COALESCE(SUM(CASE WHEN deleted=0 THEN other_expenses ELSE 0 END), 0) AS other_total,
+                COUNT(DISTINCT CASE WHEN deleted=0 THEN local_agent END) AS supplier_count
+            FROM purchases
+        ),
+        customer_summary AS (
+            SELECT
+                COALESCE(SUM(CASE WHEN active=1 THEN opening_balance ELSE 0 END), 0) AS opening_balances,
+                COUNT(CASE WHEN active=1 THEN 1 END) AS customers_count
+            FROM customers
+        )
+        SELECT
+            pus.purchased_kg,
+            ss.sales_total,
+            pms.payments_total,
+            cs.opening_balances,
+            cs.customers_count,
+            ss.transactions_count,
+            pus.purchase_cost_total,
+            pus.transport_total,
+            pus.other_total,
+            pus.supplier_count,
+            ss.today_sales,
+            pms.today_payments,
+            ss.month_sales,
+            pms.month_payments
+        FROM sales_summary ss
+        CROSS JOIN payments_summary pms
+        CROSS JOIN purchases_summary pus
+        CROSS JOIN customer_summary cs
+    """, (today, month_start, today, month_start)).fetchone()
+
+    sale_payment_totals = conn.execute("""
+        SELECT s.transaction_id, s.total_sale,
+               COALESCE(SUM(p.amount),0) AS total_paid
+        FROM sales s
+        LEFT JOIN payments p ON p.transaction_id=s.transaction_id AND p.deleted=0
+        WHERE s.deleted=0
+        GROUP BY s.transaction_id, s.total_sale
+    """).fetchall()
+
+    paid = 0
+    part = 0
+    sale_outstanding = 0.0
+    for row in sale_payment_totals:
+        total_sale = float(row["total_sale"] or 0)
+        total_paid = float(row["total_paid"] or 0)
+        if total_paid >= total_sale - 0.005:
+            paid += 1
+        elif total_paid > 0:
+            part += 1
+        sale_outstanding += max(total_sale - total_paid, 0.0)
+
+    sales = float(summary_row["sales_total"] or 0)
+    payments = float(summary_row["payments_total"] or 0)
+    opening_balances = float(summary_row["opening_balances"] or 0)
+    purchase_cost = float(summary_row["purchase_cost_total"] or 0)
+    transport = float(summary_row["transport_total"] or 0)
+    other = float(summary_row["other_total"] or 0)
+    customers = int(summary_row["customers_count"] or 0)
+    transactions = int(summary_row["transactions_count"] or 0)
+    unpaid = max(transactions - paid - part, 0)
     outstanding = max(float(opening_balances), 0) + float(sale_outstanding)
     expenses = float(purchase_cost) + float(transport) + float(other)
     cost_summary = cogs_summary(conn)
     profit = float(sales) - float(cost_summary["cogs"])
+
     recent = conn.execute("""SELECT s.sales_id transaction_id,s.sales_id,s.sale_date,c.name,s.quantity_kg,s.total_sale,
         COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) paid
         FROM sales s JOIN customers c ON c.id=s.customer_id WHERE s.deleted=0 ORDER BY s.id DESC LIMIT 8""").fetchall()
@@ -1372,15 +1531,15 @@ def dashboard():
                   WHERE ps.customer_id=c.id AND ps.deleted=0 AND p.deleted=0),0) total_paid
         FROM customers c LEFT JOIN sales s ON s.customer_id=c.id AND s.deleted=0
         GROUP BY c.id HAVING total_sales-total_paid > 0.005 ORDER BY total_sales-total_paid DESC LIMIT 8""").fetchall()
-    monthly_sales = conn.execute("""SELECT substr(sale_date,1,7) month,COALESCE(SUM(total_sale),0) revenue,
-        COALESCE(SUM(quantity_kg),0) quantity FROM sales WHERE deleted=0 GROUP BY month ORDER BY month DESC LIMIT 6""").fetchall()
-    monthly_purchases = conn.execute("""SELECT substr(purchase_date,1,7) month,COALESCE(SUM(total_cost),0) cost,
-        COALESCE(SUM(quantity_received_kg),0) quantity FROM purchases WHERE deleted=0 GROUP BY month ORDER BY month DESC LIMIT 6""").fetchall()
-    supplier_count = conn.execute("SELECT COUNT(DISTINCT local_agent) v FROM purchases WHERE deleted=0").fetchone()["v"]
-    today_sales = conn.execute("SELECT COALESCE(SUM(total_sale),0) v FROM sales WHERE deleted=0 AND sale_date=?", (today,)).fetchone()["v"]
-    today_payments = conn.execute("SELECT COALESCE(SUM(amount),0) v FROM payments WHERE deleted=0 AND payment_date=?", (today,)).fetchone()["v"]
-    month_sales = conn.execute("SELECT COALESCE(SUM(total_sale),0) v FROM sales WHERE deleted=0 AND sale_date>=?", (month_start,)).fetchone()["v"]
-    month_payments = conn.execute("SELECT COALESCE(SUM(amount),0) v FROM payments WHERE deleted=0 AND payment_date>=?", (month_start,)).fetchone()["v"]
+    monthly_sales = [dict(row) for row in conn.execute("""SELECT substr(sale_date,1,7) month,COALESCE(SUM(total_sale),0) revenue,
+        COALESCE(SUM(quantity_kg),0) quantity FROM sales WHERE deleted=0 GROUP BY month ORDER BY month DESC LIMIT 6""").fetchall()]
+    monthly_purchases = [dict(row) for row in conn.execute("""SELECT substr(purchase_date,1,7) month,COALESCE(SUM(total_cost),0) cost,
+        COALESCE(SUM(quantity_received_kg),0) quantity FROM purchases WHERE deleted=0 GROUP BY month ORDER BY month DESC LIMIT 6""").fetchall()]
+    supplier_count = int(summary_row["supplier_count"] or 0)
+    today_sales = float(summary_row["today_sales"] or 0)
+    today_payments = float(summary_row["today_payments"] or 0)
+    month_sales = float(summary_row["month_sales"] or 0)
+    month_payments = float(summary_row["month_payments"] or 0)
     pending_invoices = conn.execute("""SELECT COUNT(*) v FROM sales s WHERE s.deleted=0 AND
         COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) < s.total_sale""").fetchone()["v"]
     recent_customers = conn.execute("""SELECT c.id, c.name, c.phone, c.location, c.customer_type,
@@ -1390,20 +1549,45 @@ def dashboard():
         GROUP BY c.id ORDER BY c.id DESC LIMIT 5""").fetchall()
     saved_dashboard_images = conn.execute("SELECT slot,filename FROM dashboard_images").fetchall()
     conn.close()
-    stats = dict(purchased=purchased,sold=sold,stock=stock,sales=float(sales),payments=float(payments),
+    stats = dict(purchased=purchased,sold=sold,stock=stock,sales=sales,payments=payments,
                  outstanding=outstanding,purchase_cost=float(purchase_cost),transport=float(transport),
                  other=float(other),expenses=expenses,profit=profit,customers=customers,transactions=transactions,
                  paid=paid,part=part,unpaid=unpaid,suppliers=supplier_count,pending_invoices=pending_invoices,
-                 today_sales=float(today_sales),today_payments=float(today_payments),
-                 month_sales=float(month_sales),month_payments=float(month_payments))
+                 today_sales=today_sales,today_payments=today_payments,
+                 month_sales=month_sales,month_payments=month_payments)
     dashboard_images = dict(DASHBOARD_IMAGE_DEFAULTS)
-    dashboard_images.update({row["slot"]: row["filename"] for row in saved_dashboard_images if row["slot"] in ALLOWED_DASHBOARD_SLOTS})
+    normalized_saved = {}
+    for row in saved_dashboard_images:
+        slot_name = DASHBOARD_SLOT_ALIASES.get(row["slot"], row["slot"])
+        if slot_name in ALLOWED_DASHBOARD_SLOTS:
+            normalized_saved[slot_name] = row["filename"]
+    dashboard_images.update(normalized_saved)
     return render_template("dashboard.html", stats=stats, recent=recent,
                            recent_purchases=recent_purchases, recent_payments=recent_payments,
                            recent_invoices=recent_invoices, outstanding_customers=outstanding_customers,
                            recent_customers=recent_customers,
                            monthly_sales=monthly_sales, monthly_purchases=monthly_purchases,
-                           dashboard_images=dashboard_images)
+                           dashboard_images=dashboard_images,
+                           dashboard_image_slots=DASHBOARD_IMAGE_SLOT_ORDER)
+
+
+@app.route("/dashboard/settings")
+@login_required
+@admin_required
+def dashboard_settings():
+    conn = db()
+    saved_dashboard_images = conn.execute("SELECT slot,filename FROM dashboard_images").fetchall()
+    conn.close()
+    dashboard_images = dict(DASHBOARD_IMAGE_DEFAULTS)
+    normalized_saved = {}
+    for row in saved_dashboard_images:
+        slot_name = DASHBOARD_SLOT_ALIASES.get(row["slot"], row["slot"])
+        if slot_name in ALLOWED_DASHBOARD_SLOTS:
+            normalized_saved[slot_name] = row["filename"]
+    dashboard_images.update(normalized_saved)
+    return render_template("dashboard_settings.html",
+                           dashboard_images=dashboard_images,
+                           dashboard_image_slots=DASHBOARD_IMAGE_SLOT_ORDER)
 
 
 @app.route("/dashboard/images", methods=["POST"])
@@ -1411,6 +1595,7 @@ def dashboard():
 @admin_required
 def update_dashboard_image():
     slot = request.form.get("slot", "").strip().lower()
+    slot = DASHBOARD_SLOT_ALIASES.get(slot, slot)
     action = request.form.get("action", "upload")
     if slot not in ALLOWED_DASHBOARD_SLOTS:
         abort(400, description="Choose a valid dashboard image area.")
@@ -1426,17 +1611,17 @@ def update_dashboard_image():
         conn.close()
         log_action("DASHBOARD IMAGE RESET", slot, f"user={session.get('username')}")
         flash(f"{slot.title()} image reset to the ADUFARMS default.", "success")
-        return redirect(url_for("dashboard") + "#dashboard-imagery")
+        return redirect(url_for("dashboard_settings") + "#dashboard-imagery")
     image = request.files.get("image")
     if not image or not image.filename:
         conn.close()
         flash("Select a JPG, PNG, or WEBP image first.", "danger")
-        return redirect(url_for("dashboard") + "#dashboard-imagery")
+        return redirect(url_for("dashboard_settings") + "#dashboard-imagery")
     extension = Path(image.filename).suffix.lower()
     if extension not in ALLOWED_PROFILE_EXTS or image.mimetype not in ALLOWED_PROFILE_MIMES or not is_valid_image_bytes(image.stream):
         conn.close()
         flash("Invalid or corrupted image file. Please upload a genuine JPG, PNG, or WEBP file.", "danger")
-        return redirect(url_for("dashboard") + "#dashboard-imagery")
+        return redirect(url_for("dashboard_settings") + "#dashboard-imagery")
     filename = secure_filename(f"dashboard-{slot}-{secrets.token_hex(8)}{extension}")
     relative_filename = f"images/dashboard/custom/{filename}"
     image.save(DASHBOARD_IMAGE_DIR / filename)
@@ -1450,7 +1635,7 @@ def update_dashboard_image():
         if old_path.exists(): old_path.unlink()
     log_action("DASHBOARD IMAGE UPDATED", slot, f"user={session.get('username')}")
     flash(f"{slot.title()} image updated.", "success")
-    return redirect(url_for("dashboard") + "#dashboard-imagery")
+    return redirect(url_for("dashboard_settings") + "#dashboard-imagery")
 
 
 @app.route("/purchases", methods=["GET","POST"])
@@ -1584,6 +1769,8 @@ def sales():
             flash(str(error) if isinstance(error, ValueError) else "The sale could not be saved.", "danger")
     related_purchase = request.args.get("related_purchase", type=int)
     selected_customer = request.args.get("customer_id", type=int)
+    page = max(int(request.args.get("page", 1) or 1), 1)
+    per_page = 80
     conn = db()
     selected_customer_row = conn.execute(
         "SELECT id,name,phone,location,address,customer_type FROM customers WHERE id=? AND active=1",
@@ -1603,17 +1790,22 @@ def sales():
         if related_purchase_row:
             sales_filter = " AND s.sale_date >= ?"
             sales_params.append(related_purchase_row["purchase_date"])
+    total_sales = conn.execute(f"SELECT COUNT(*) AS c FROM sales s WHERE {visible_sql('s')} {sales_filter}", sales_params).fetchone()["c"]
+    page_count = max((total_sales + per_page - 1) // per_page, 1)
+    page = min(page, page_count)
+    offset = (page - 1) * per_page
     rows = conn.execute(f"""SELECT s.*,c.name customer_name,c.phone,
         COALESCE(s.invoice_number, i.invoice_number) invoice_number,
         COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.transaction_id=s.transaction_id AND p.deleted=0),0) paid
         FROM sales s JOIN customers c ON c.id=s.customer_id LEFT JOIN invoices i ON i.transaction_id=s.transaction_id AND i.deleted=0
         WHERE {visible_sql('s')} {sales_filter}
-        ORDER BY s.sale_date ASC, s.id ASC LIMIT 100""", sales_params).fetchall()
+        ORDER BY s.sale_date ASC, s.id ASC LIMIT ? OFFSET ?""", [*sales_params, per_page, offset]).fetchall()
     conn.close()
     _, _, stock = stock_summary()
     return render_template("sales.html", rows=rows, stock=stock, today=date.today().isoformat(),
                            related_purchase=related_purchase_row, selected_customer=selected_customer_row,
-                           customers=all_customers)
+                           customers=all_customers, page=page, page_count=page_count,
+                           per_page=per_page, total_sales=total_sales)
 
 
 @app.route("/payments", methods=["GET","POST"])
@@ -1926,17 +2118,26 @@ def customers():
                 conn.close()
             flash(str(error) if isinstance(error, ValueError) else "The customer could not be saved.", "danger")
     blocked_customer = request.args.get("blocked_customer", type=int)
+    page = max(int(request.args.get("page", 1) or 1), 1)
+    per_page = 100
+    offset = (page - 1) * per_page
     conn = db()
+    total_customers = conn.execute("SELECT COUNT(*) AS c FROM customers WHERE active=1").fetchone()["c"]
+    page_count = max((total_customers + per_page - 1) // per_page, 1)
+    page = min(page, page_count)
+    offset = (page - 1) * per_page
     rows = conn.execute("""SELECT c.*, COALESCE(SUM(s.total_sale), 0) total_sales,
         COALESCE((SELECT SUM(p.amount) FROM payments p JOIN sales ps ON ps.transaction_id=p.transaction_id
               WHERE ps.customer_id=c.id AND ps.deleted=0 AND p.deleted=0), 0) total_paid
         FROM customers c LEFT JOIN sales s ON s.customer_id=c.id AND s.deleted=0
-        WHERE c.active=1 GROUP BY c.id ORDER BY c.name""").fetchall()
+        WHERE c.active=1 GROUP BY c.id ORDER BY c.name LIMIT ? OFFSET ?""", (per_page, offset)).fetchall()
     blocked_customer_row = None
     if blocked_customer:
         blocked_customer_row = conn.execute("SELECT id,name FROM customers WHERE id=?", (blocked_customer,)).fetchone()
     conn.close()
-    return render_template("customers.html", rows=rows, blocked_customer=blocked_customer_row)
+    return render_template("customers.html", rows=rows, blocked_customer=blocked_customer_row,
+                           page=page, page_count=page_count, per_page=per_page,
+                           total_customers=total_customers)
 
 
 @app.route("/customers/<int:customer_id>")
@@ -2411,7 +2612,7 @@ def invoice_pdf(transaction_id):
             watermark_logo.putalpha(watermark_logo.getchannel("A").point(lambda value: int(value * 0.12)))
             watermark_logo.save(watermark_buffer, format="PNG", optimize=True, compress_level=9)
         watermark_buffer.seek(0)
-    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=12*mm,leftMargin=12*mm,topMargin=12*mm,bottomMargin=12*mm)
+    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=10*mm,leftMargin=10*mm,topMargin=8*mm,bottomMargin=8*mm)
     def draw_watermark(canvas, document):
         if not watermark_buffer.getbuffer().nbytes:
             return
@@ -2432,7 +2633,7 @@ def invoice_pdf(transaction_id):
                     [Paragraph("<b>INVOICE</b>", styles["SmallRight"]), Paragraph(info["invoice_number"], styles["SmallRight"]), Paragraph(pretty_date(info["sale_date"]), styles["SmallRight"]), Paragraph(f"<b>{info['status']}</b>", styles["SmallRight"])] ]], colWidths=[32*mm,82*mm,64*mm])
     header.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"TOP"),("LINEBELOW",(0,0),(-1,-1),1,colors.HexColor("#c99b2f")),("LEFTPADDING",(0,0),(-1,-1),0),("RIGHTPADDING",(0,0),(-1,-1),4)]))
     story.append(header)
-    story.append(Spacer(1,10))
+    story.append(Spacer(1,6))
     meta = [["BILLED TO", info["customer_name"], "TRANSACTION DETAILS", ""],
             ["Phone", info["customer_phone"] or "-", "Sales ID", info["sales_id"]],
             ["Address", info["customer_address"] or info["customer_location"] or "-", "Invoice No.", info["invoice_number"]],
@@ -2440,7 +2641,7 @@ def invoice_pdf(transaction_id):
             ["", "", "Invoice / due date", pretty_date(info["sale_date"])]]
     t = Table(meta, colWidths=[28*mm,70*mm,32*mm,48*mm])
     t.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.4,colors.HexColor("#dce6df")),("BACKGROUND",(0,0),(-1,0),colors.HexColor("#e9f2eb")),("TEXTCOLOR",(0,0),(-1,0),colors.HexColor("#173c2b")),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold")]))
-    story += [t, Spacer(1,15)]
+    story += [t, Spacer(1,8)]
     data = [["Description","Qty","Unit","Unit Price (GHS)","Total (GHS)"],
             [Paragraph("<b>Maize supply</b><br/><font color='#52665b'>Fresh maize distribution</font>", styles["Normal"]),
              f'{info["quantity_kg"]:,.2f}', "KG", money(info["selling_price_kg"]), money(info["total_sale"])]]
@@ -2468,7 +2669,7 @@ def invoice_pdf(transaction_id):
     delivery_text += "Payment is due on the invoice date unless otherwise agreed."
     delivery = Table([[Paragraph("<b>DELIVERY INFORMATION</b>", styles["Muted"]), Paragraph(delivery_text, styles["Normal"])]], colWidths=[42*mm,144*mm])
     delivery.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#f7faf7")),("BOX",(0,0),(-1,-1),0.4,colors.HexColor("#dce6df")),("VALIGN",(0,0),(-1,-1),"TOP"),("LEFTPADDING",(0,0),(-1,-1),8),("RIGHTPADDING",(0,0),(-1,-1),8),("TOPPADDING",(0,0),(-1,-1),8),("BOTTOMPADDING",(0,0),(-1,-1),8)]))
-    story += [t2, Spacer(1,12), delivery, Spacer(1,12), Paragraph("<b>PAYMENT HISTORY</b>", styles["Heading3"]), payment_table, Spacer(1,15)]
+    story += [t2, Spacer(1,6), delivery, Spacer(1,6), Paragraph("<b>PAYMENT HISTORY</b>", styles["Heading3"]), payment_table, Spacer(1,8)]
     totals=[["Subtotal",money(info["total_sale"])],
             ["Delivery fee","GHS 0.00"],
             ["Discount","GHS 0.00"],
@@ -2482,9 +2683,9 @@ def invoice_pdf(transaction_id):
                             ("BACKGROUND",(0,0),(0,-1),colors.HexColor("#f3f8f4"))]))
     payment_lines = [Paragraph(f"<b>MOBILE MONEY</b>: {COMPANY['momo_number']} · {COMPANY['momo_name']}", styles["Normal"]),
                      Paragraph(f"<b>BANK</b>: {COMPANY['bank_account']} · {COMPANY['bank_account_name']} · {COMPANY['bank_name']} ({COMPANY['bank_branch']})", styles["Normal"]),
-                     Spacer(1, 12), Paragraph("Authorized signature: ____________________________", styles["Normal"]),
+                     Spacer(1, 6), Paragraph("Authorized signature: ____________________________", styles["Normal"]),
                      Paragraph("Payment is due on the invoice date unless otherwise agreed in writing.", styles["Muted"])]
-    story += [t3, Spacer(1,12)] + payment_lines + [Spacer(1,18), Paragraph(f"Thank you for doing business with {COMPANY['legal_name']}. {COMPANY['tagline']}", styles["Center"])]
+    story += [t3, Spacer(1,6)] + payment_lines + [Spacer(1,8), Paragraph(f"Thank you for doing business with {COMPANY['legal_name']}. {COMPANY['tagline']}", styles["Center"])]
     doc.build(story, onFirstPage=draw_watermark, onLaterPages=draw_watermark); buf.seek(0)
     inline = request.args.get("inline", "0").lower() in {"1", "true", "yes"}
     return send_file(buf, as_attachment=not inline, download_name=f"{info['invoice_number']}.pdf", mimetype="application/pdf")
@@ -3047,17 +3248,33 @@ def assistant():
 
 
 @app.route("/health")
+@app.route("/ready")
 def health():
     try:
         conn = db()
         try:
-            conn.execute("SELECT 1 FROM users LIMIT 1").fetchone()
+            conn.execute("SELECT 1").fetchone()
         finally:
             conn.close()
-    except sqlite3.Error:
+        return jsonify({
+            "status": "ok",
+            "ready": True,
+            "application": "ADUFARMS",
+            "environment": environment,
+            "database": str(DB_PATH),
+            "time": now(),
+        })
+    except Exception as exc:
         app.logger.exception("Health check database failure")
-        return {"status": "degraded", "application": "ADUFARMS", "time": now()}, 503
-    return {"status": "ok", "application": "ADUFARMS", "time": now()}
+        return jsonify({
+            "status": "error",
+            "ready": False,
+            "application": "ADUFARMS",
+            "environment": environment,
+            "database": str(DB_PATH),
+            "error": str(exc),
+            "time": now(),
+        }), 503
 
 
 @app.errorhandler(403)

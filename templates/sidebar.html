@@ -37,11 +37,11 @@
   {% if (session.get('role') or '')|upper == 'ADMIN' %}
     <div class="sidebar-section-label administration-label">Administration</div>
     <nav class="sidebar-nav" aria-label="Administration navigation">
-      {% set admin_items = [('users','Users','people','users'),('dashboard','Dashboard Settings','image','dashboard-settings'),('admin_backup','Backup & Restore','database-down','backup'),('deleted_records','Recycle Bin','archive','recycle'),('profile','System Settings','sliders2','settings'),('audit_logs','Audit Log','shield-check','audit')] %}
+      {% set admin_items = [('users','Users','people','users'),('dashboard_settings','Dashboard Settings','image','dashboard-settings'),('admin_backup','Backup & Restore','database-down','backup'),('deleted_records','Recycle Bin','archive','recycle'),('profile','System Settings','sliders2','settings'),('audit_logs','Audit Log','shield-check','audit')] %}
       {% for endpoint, label, icon, anchor in admin_items %}
-        {% set admin_active = (anchor == 'users' and request.endpoint == 'users') or (anchor == 'dashboard-settings' and request.endpoint == 'dashboard') or (anchor == 'audit' and request.endpoint == 'audit_logs') or (anchor == 'backup' and request.endpoint == 'admin_backup') or (anchor == 'recycle' and request.endpoint == 'deleted_records') or (anchor == 'settings' and request.endpoint == 'profile') %}
+        {% set admin_active = (anchor == 'users' and request.endpoint == 'users') or (anchor == 'dashboard-settings' and request.endpoint == 'dashboard_settings') or (anchor == 'audit' and request.endpoint == 'audit_logs') or (anchor == 'backup' and request.endpoint == 'admin_backup') or (anchor == 'recycle' and request.endpoint == 'deleted_records') or (anchor == 'settings' and request.endpoint == 'profile') %}
         {% if anchor == 'dashboard-settings' %}
-          {% set admin_url = url_for('dashboard') ~ '#dashboard-imagery' %}
+          {% set admin_url = url_for('dashboard_settings') %}
         {% elif anchor == 'settings' %}
           {% set admin_url = url_for('profile') ~ '#security' %}
         {% else %}

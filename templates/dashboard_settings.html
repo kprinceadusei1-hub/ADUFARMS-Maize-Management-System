@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Dashboard Settings - ADUFARMS Maize Management System{% endblock %}
+{% block content %}
+
+<div class="dashboard-heading mb-4">
+  <div>
+    <span class="eyebrow">ADMIN</span>
+    <h2>Dashboard settings</h2>
+    <p>Control the branding and imagery used across the operational dashboard and related pages.</p>
+  </div>
+</div>
+
+<section class="dashboard-imagery card" id="dashboard-imagery">
+  <div class="card-body">
+    <div class="panel-title d-flex justify-content-between align-items-start gap-3 mb-3">
+      <div>
+        <span class="eyebrow">DASHBOARD SETTINGS</span>
+        <h5 class="mb-1">Dashboard imagery</h5>
+        <p class="text-muted small mb-0">Choose a JPG, PNG or WEBP image for each section. Recommended size: 1200x500 or larger for best quality.</p>
+      </div>
+      <span class="badge bg-success-subtle text-success-emphasis px-2 py-1">Live preview</span>
+    </div>
+
+    <div class="alert alert-light border mb-3 small text-muted">
+      Set a unique banner or visual for each module. The dashboard, stock, purchases, sales, invoice and support pages all use the same saved branding so you can keep the whole system aligned.
+    </div>
+
+    <div class="image-manager-grid">
+      {% for slot,title,description in dashboard_image_slots %}
+      <article class="image-manager-item">
+        <img src="{{ url_for('static', filename=dashboard_images[slot]) }}" alt="Current {{ title|lower }}">
+        <div class="image-manager-copy">
+          <span class="text-uppercase small fw-bold text-muted">{{ slot.replace('_', ' ') }}</span>
+          <strong>{{ title }}</strong>
+          <small>{{ description }}</small>
+        </div>
+
+        <form method="post" action="{{ url_for('update_dashboard_image') }}" enctype="multipart/form-data" class="image-upload-form">
+          <input type="hidden" name="slot" value="{{ slot }}">{{ csrf_input() }}
+          <label class="form-label small text-muted mb-1">Choose image</label>
+          <input class="form-control form-control-sm" type="file" name="image" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" required>
+          <div class="d-flex gap-2 mt-2">
+            <button class="btn btn-sm btn-primary" type="submit"><i class="bi bi-upload me-1"></i> Save</button>
+          </div>
+        </form>
+
+        <form method="post" action="{{ url_for('update_dashboard_image') }}" class="reset-image-form">
+          <input type="hidden" name="slot" value="{{ slot }}">
+          <input type="hidden" name="action" value="reset">{{ csrf_input() }}
+          <button class="btn btn-sm btn-link" type="submit">Restore default</button>
+        </form>
+      </article>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+{% endblock %}

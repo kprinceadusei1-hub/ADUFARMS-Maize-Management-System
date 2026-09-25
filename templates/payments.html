@@ -9,7 +9,7 @@
       <i class="bi bi-wallet2 text-success me-1"></i> TREASURY &amp; SETTLEMENTS
     </span>
     <h2 class="mb-1">Payment Tracking &amp; Collections</h2>
-    <p class="text-muted mb-0">Record customer settlement receipts, verify Mobile Money and cash payments, and reconcile sales ledgers.</p>
+    <p class="text-muted mb-0">Record customer payments, verify Mobile Money and cash payments, and reconcile sales ledgers.</p>
   </div>
   <div class="d-flex align-items-center gap-2 flex-wrap">
     <span class="status-badge status-paid"><i class="bi bi-shield-check"></i> AUDITED TREASURY</span>
@@ -168,7 +168,7 @@
   <div class="card-body">
     <div class="panel-title d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
       <div>
-        <h5 class="mb-0">Payment History &amp; Settlement Receipts ({{ rows|length }})</h5>
+        <h5 class="mb-0">Payment History &amp; Collections ({{ rows|length }})</h5>
         <small class="text-muted">Customer colors match the directory, sales, and invoices</small>
       </div>
       <div class="d-flex align-items-center gap-2 flex-wrap">
@@ -259,10 +259,6 @@
             </td>
             <td class="text-end">
               <div class="btn-group btn-group-sm">
-                <button type="button" class="btn btn-outline-success" title="Print Official Receipt"
-                        onclick="openReceiptModal({{ r.payment_id|tojson }}, {{ r.sales_id|tojson }}, {{ r.customer_name|tojson }}, {{ (r.phone or '')|tojson }}, {{ (r.payment_date|pretty_date)|tojson }}, {{ (r.amount|money)|tojson }}, {{ r.payment_method|tojson }}, {{ (r.payment_reference or 'N/A')|tojson }}, {{ r.staff_user|tojson }}, {{ (r.notes or '')|tojson }})">
-                  <i class="bi bi-printer me-1"></i>Receipt
-                </button>
                 <a class="btn btn-outline-primary" href="{{ url_for('transaction_history', transaction_id=r.sales_id) }}" title="View Sales History">
                   <i class="bi bi-clock-history"></i>
                 </a>
@@ -324,94 +320,6 @@
 </div>
 </div>
 
-<div class="modal fade" id="paymentReceiptModal" tabindex="-1" aria-labelledby="receiptModalTitle" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-lg">
-    <div class="modal-content">
-      <div class="modal-header bg-light">
-        <h5 class="modal-title" id="receiptModalTitle">
-          <i class="bi bi-shield-check text-success me-2"></i>Official Settlement Receipt
-        </h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body p-4" id="printableReceiptArea">
-        <div class="receipt-paper">
-          <div class="receipt-header d-flex justify-content-between align-items-start flex-wrap gap-2">
-            <div>
-              <div class="d-flex align-items-center gap-2 mb-1">
-                <i class="bi bi-building fs-4 text-success"></i>
-                <h4 class="mb-0 fw-bold" style="font-family:'Space Grotesk',sans-serif;color:#0d1a13;">ADUFARMS LIMITED</h4>
-              </div>
-              <small class="text-muted d-block">Ghana Agribusiness Grain Trading, Storage &amp; Distribution</small>
-              <small class="text-muted">Techiman · Kumasi · Koforidua Hubs</small>
-            </div>
-            <div class="text-end">
-              <span class="receipt-stamp">PAYMENT CLEARED</span>
-              <div class="mt-2">
-                <small class="text-muted d-block">RECEIPT NUMBER</small>
-                <strong id="receiptIdText" class="font-monospace fs-6 text-dark">ADU-PAY-...</strong>
-              </div>
-            </div>
-          </div>
-          <div class="row g-3 mb-4">
-            <div class="col-md-6">
-              <small class="text-muted text-uppercase fw-semibold" style="font-size:.7rem;">Received From (Customer)</small>
-              <h5 id="receiptCustomerText" class="mb-0 fw-bold mt-1 text-dark">Customer Name</h5>
-              <small id="receiptPhoneText" class="text-muted">055 000 0000</small>
-            </div>
-            <div class="col-md-3">
-              <small class="text-muted text-uppercase fw-semibold" style="font-size:.7rem;">Payment Date</small>
-              <div id="receiptDateText" class="fw-semibold text-dark mt-1">—</div>
-            </div>
-            <div class="col-md-3">
-              <small class="text-muted text-uppercase fw-semibold" style="font-size:.7rem;">Sales Reference</small>
-              <div id="receiptSalesIdText" class="font-monospace fw-semibold text-primary mt-1">ADU-SAL-...</div>
-            </div>
-          </div>
-          <table class="table receipt-table mb-4">
-            <thead>
-              <tr>
-                <th>Description</th>
-                <th>Channel</th>
-                <th>Reference / Proof</th>
-                <th class="text-end">Amount Cleared</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>
-                  <strong>Grain Settlement Receipt</strong><br>
-                  <small id="receiptRemarksText" class="text-muted">Maize grain delivery settlement</small>
-                </td>
-                <td><span id="receiptMethodText" class="fw-medium">Mobile Money</span></td>
-                <td><code id="receiptRefText" class="fw-semibold text-dark">—</code></td>
-                <td class="text-end">
-                  <span id="receiptAmountText" class="fs-5 fw-bold text-success">GH₵0.00</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <div class="d-flex justify-content-between align-items-end pt-3 border-top border-2 border-dashed">
-            <div>
-              <small class="text-muted d-block">Authorized Treasury Officer</small>
-              <strong id="receiptCashierText" class="text-dark">admin</strong>
-              <div class="text-muted small mt-1"><i class="bi bi-shield-lock-fill text-success me-1"></i>Verified &amp; Recorded in ADUFARMS Core Ledger</div>
-            </div>
-            <div class="text-end">
-              <small class="text-muted d-block">Total Settlement Cleared</small>
-              <strong id="receiptTotalText" class="fs-4 text-success fw-bold">GH₵0.00</strong>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer bg-light">
-        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
-        <button type="button" class="btn btn-success" onclick="printReceiptContent()">
-          <i class="bi bi-printer-fill me-1"></i> Print Official Receipt
-        </button>
-      </div>
-    </div>
-  </div>
-</div>
 {% endblock %}
 
 {% block scripts %}
@@ -457,34 +365,5 @@ document.querySelectorAll('.table-filter-btn').forEach(btn => {
   });
 });
 
-function openReceiptModal(payId, saleId, customerName, phone, payDate, amount, method, ref, cashier, remarks) {
-  document.getElementById('receiptIdText').textContent = payId;
-  document.getElementById('receiptCustomerText').textContent = customerName;
-  document.getElementById('receiptPhoneText').textContent = phone ? phone : 'Contact on file';
-  document.getElementById('receiptDateText').textContent = payDate;
-  document.getElementById('receiptSalesIdText').textContent = saleId;
-  document.getElementById('receiptAmountText').textContent = '+' + amount;
-  document.getElementById('receiptTotalText').textContent = amount;
-  document.getElementById('receiptMethodText').textContent = method;
-  document.getElementById('receiptRefText').textContent = ref ? ref : 'N/A';
-  document.getElementById('receiptCashierText').textContent = cashier;
-  document.getElementById('receiptRemarksText').textContent = remarks ? remarks : 'Payment verified and posted to sales ledger.';
-  const modalEl = document.getElementById('paymentReceiptModal');
-  bootstrap.Modal.getOrCreateInstance(modalEl).show();
-}
-
-function printReceiptContent() {
-  const content = document.getElementById('printableReceiptArea').innerHTML;
-  const printWindow = window.open('', '_blank', 'height=650,width=800');
-  printWindow.document.write('<html><head><title>Payment Receipt</title>');
-  printWindow.document.write('<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">');
-  printWindow.document.write('<style>body{font-family:system-ui,sans-serif;padding:20px;background:#fff;} .receipt-paper{border:1px solid #ccc;padding:24px;border-radius:8px;} .receipt-header{border-bottom:2px dashed #999;padding-bottom:12px;margin-bottom:15px;} .receipt-stamp{border:2px solid #16a34a;color:#16a34a;font-weight:bold;padding:3px 8px;border-radius:4px;display:inline-block;}</style>');
-  printWindow.document.write('</head><body>');
-  printWindow.document.write(content);
-  printWindow.document.write('</body></html>');
-  printWindow.document.close();
-  printWindow.focus();
-  setTimeout(() => { printWindow.print(); printWindow.close(); }, 300);
-}
 </script>
 {% endblock %}

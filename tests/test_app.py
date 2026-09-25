@@ -1,8 +1,10 @@
+import io
 import os
 import sqlite3
 from pathlib import Path
 
 import pytest
+from PIL import Image
 from werkzeug.security import generate_password_hash
 
 TEST_DATABASE = Path(__file__).resolve().parent / "test-adufarms.db"
@@ -47,6 +49,14 @@ def login_session(client):
         session.update(user_id=1, username="admin", full_name="Test Admin", role="ADMIN")
 
 
+def test_health_endpoint_reports_system_readiness(client):
+    response = client.get("/health")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["status"] == "ok"
+    assert payload["database"]
+
+
 def test_route_endpoints_build_without_errors():
     with application.app.test_request_context():
         for rule in application.app.url_map.iter_rules():
@@ -89,6 +99,65 @@ def test_dashboard_includes_customer_opening_balance(client):
     response = client.get("/dashboard")
     assert response.status_code == 200
     assert b"GHS 125.00" in response.data
+
+
+def test_dashboard_handles_monthly_sales_data(client):
+    seed_admin()
+    conn = application.db()
+    customer_id = conn.execute(
+        "INSERT INTO customers(name,phone,created_at) VALUES(?,?,?)",
+        ("Chart Customer", "111", application.now()),
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO sales(transaction_id,sales_id,invoice_number,sale_date,customer_id,quantity_kg,selling_price_kg,total_sale,staff_user,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        ("ADU-CHART-1", "ADU-SAL-CHART-1", "ADU-INV-CHART-1", "2026-09-22", customer_id, 10, 5, 50, "admin", application.now()),
+    )
+    conn.commit()
+    conn.close()
+    login_session(client)
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    assert b"Chart Customer" in response.data or b"Latest activity" in response.data
+
+
+def test_dashboard_default_images_are_unique():
+    assert len(application.DASHBOARD_IMAGE_DEFAULTS) == len(set(application.DASHBOARD_IMAGE_DEFAULTS.values()))
+
+
+def test_dashboard_settings_page_is_separate_from_dashboard(client):
+    seed_admin()
+    login_session(client)
+    response = client.get("/dashboard/settings")
+    assert response.status_code == 200
+    assert b"Dashboard imagery" in response.data
+    assert b"dashboard-imagery" in response.data
+
+
+def test_dashboard_imagery_accepts_sales_slot(client):
+    seed_admin()
+    login_session(client)
+    with client.session_transaction() as session:
+        session["csrf_token"] = "dashboard-sales-csrf"
+    image_buffer = io.BytesIO()
+    Image.new("RGB", (100, 60), color="green").save(image_buffer, format="PNG")
+    image_buffer.seek(0)
+    response = client.post(
+        "/dashboard/images",
+        data={
+            "slot": "sales",
+            "csrf_token": "dashboard-sales-csrf",
+            "image": (image_buffer, "sales.png"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/dashboard/settings#dashboard-imagery"
+    conn = application.db()
+    saved = conn.execute("SELECT slot, filename FROM dashboard_images WHERE slot='sales'").fetchone()
+    conn.close()
+    assert saved is not None
+    assert saved["slot"] == "sales"
 
 
 def test_login_requires_csrf_token(client):
@@ -158,6 +227,32 @@ def test_invoice_opens_payment_collection_for_unpaid_sale(client):
     assert b"ADU-SAL-TEST-1" in payment_response.data
 
 
+def test_invoice_pdf_stays_on_one_a4_page(client):
+    seed_admin()
+    conn = application.db()
+    conn.execute("UPDATE users SET active=1,role='ADMIN' WHERE id=1")
+    customer_id = conn.execute(
+        "INSERT INTO customers(name,phone,created_at) VALUES(?,?,?)",
+        ("PDF Customer", "333", application.now()),
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO sales(transaction_id,sales_id,invoice_number,sale_date,customer_id,quantity_kg,selling_price_kg,total_sale,staff_user,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        ("ADU-PDF-ONE", "ADU-SAL-PDF-ONE", "ADU-INV-PDF-ONE", "2026-09-23", customer_id, 12, 6, 72, "admin", application.now()),
+    )
+    conn.execute(
+        "INSERT INTO invoices(invoice_number,transaction_id,sales_id,invoice_date,generated_by,generated_at) VALUES(?,?,?,?,?,?)",
+        ("ADU-INV-PDF-ONE", "ADU-PDF-ONE", "ADU-SAL-PDF-ONE", "2026-09-23", "admin", application.now()),
+    )
+    conn.commit()
+    conn.close()
+    login_session(client)
+
+    response = client.get("/invoice/ADU-SAL-PDF-ONE/pdf?inline=1")
+    assert response.status_code == 200
+    assert response.mimetype == "application/pdf"
+    assert response.data.count(b"/Type /Page") == 1
+
+
 def test_customer_creation_rejects_duplicate_normalized_identity(client):
     seed_admin()
     login_session(client)
@@ -178,11 +273,107 @@ def test_customer_creation_rejects_duplicate_normalized_identity(client):
         "opening_balance": "0",
         "customer_type": "RETAIL",
     })
-    assert response.status_code == 200
-    assert b"This customer already exists" in response.data
+    assert response.status_code == 302
+    assert "/sales?customer_id=" in response.headers["Location"]
     conn = application.db()
     assert conn.execute("SELECT COUNT(*) FROM customers").fetchone()[0] == before
     conn.close()
+
+
+def test_purchase_sale_payment_cycle_remains_consistent(client):
+    conn = application.db()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    for table in ("payments", "sales", "purchases", "customers", "users", "audit_log", "stock_movements"):
+        conn.execute(f"DELETE FROM {table}")
+    conn.execute("DELETE FROM sqlite_sequence WHERE name IN ('users','customers','purchases','sales','payments','audit_log','stock_movements')")
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.close()
+
+    seed_admin()
+    login_session(client)
+    with client.session_transaction() as session:
+        session["csrf_token"] = "e2e-flow-csrf"
+
+    customer_response = client.post(
+        "/customers",
+        data={
+            "csrf_token": "e2e-flow-csrf",
+            "name": "Ama Boateng",
+            "phone": "024 456 7890",
+            "location": "Kumasi",
+            "address": "Adum Market",
+            "opening_balance": "0",
+            "customer_type": "RETAIL",
+        },
+        follow_redirects=False,
+    )
+    assert customer_response.status_code == 302
+
+    purchase_response = client.post(
+        "/purchases",
+        data={
+            "csrf_token": "e2e-flow-csrf",
+            "purchase_date": application.now().split()[0],
+            "local_agent": "Farming Group",
+            "agent_phone": "020 000 0000",
+            "location": "Ejura",
+            "quantity_kg": "100",
+            "quantity_received_kg": "100",
+            "price_per_kg": "4.2",
+            "transport_cost": "40",
+            "other_expenses": "15",
+        },
+        follow_redirects=False,
+    )
+    assert purchase_response.status_code == 302
+
+    conn = application.db()
+    customer_id = conn.execute("SELECT id FROM customers WHERE name='Ama Boateng'").fetchone()["id"]
+    sale_response = client.post(
+        "/sales",
+        data={
+            "csrf_token": "e2e-flow-csrf",
+            "sale_date": application.now().split()[0],
+            "customer_id": str(customer_id),
+            "customer_name": "Ama Boateng",
+            "customer_phone": "024 456 7890",
+            "quantity_kg": "50",
+            "selling_price_kg": "6.50",
+        },
+        follow_redirects=False,
+    )
+    assert sale_response.status_code == 302
+    sale = conn.execute(
+        "SELECT transaction_id, total_sale, quantity_kg FROM sales WHERE customer_id=? ORDER BY id DESC LIMIT 1",
+        (customer_id,),
+    ).fetchone()
+
+    payment_response = client.post(
+        "/payments",
+        data={
+            "csrf_token": "e2e-flow-csrf",
+            "payment_date": application.now().split()[0],
+            "transaction_id": sale["transaction_id"],
+            "customer_id": str(customer_id),
+            "amount": "150",
+            "payment_method": "MOBILE MONEY",
+            "payment_reference": "MM-001",
+        },
+        follow_redirects=False,
+    )
+    assert payment_response.status_code in {200, 302}
+    payment_total = conn.execute(
+        "SELECT COALESCE(SUM(amount),0) FROM payments WHERE transaction_id=? AND deleted=0",
+        (sale["transaction_id"],),
+    ).fetchone()[0]
+    stock_remaining = conn.execute(
+        "SELECT COALESCE((SELECT SUM(quantity_received_kg) FROM purchases WHERE deleted=0),0) - COALESCE((SELECT SUM(quantity_kg) FROM sales WHERE deleted=0),0)"
+    ).fetchone()[0]
+    conn.close()
+    assert sale["total_sale"] == 325.0
+    assert payment_total == 150.0
+    assert stock_remaining == 50.0
 
 
 def test_backup_restore_verifies_and_preserves_safety_copy(tmp_path, monkeypatch):

@@ -3,7 +3,7 @@
 {% block content %}
 
 <!-- Executive Welcome Hero Banner -->
-<section class="welcome-hero-banner" aria-labelledby="welcome-banner-title" style="--dashboard-hero-image:url('{{ url_for('static', filename=dashboard_images.hero) }}')">
+<section class="welcome-hero-banner" aria-labelledby="welcome-banner-title" data-hero-image="{{ url_for('static', filename=dashboard_images.hero) }}">
   <div class="welcome-hero-inner">
     <div class="welcome-hero-copy">
       <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
@@ -98,7 +98,7 @@
 </section>
 
 <!-- Middle Analytics & Quick Actions Row -->
-<div class="row g-3 mb-4">
+<div class="row g-3 mb-4 dashboard-analytics-row">
   <!-- Sales Overview Chart -->
   <div class="col-lg-5">
     <div class="card h-100">
@@ -371,6 +371,26 @@
         </div>
       </div>
 
+      <!-- Inventory Spotlight -->
+      <div class="card">
+        <div class="card-body p-0">
+          <div class="position-relative overflow-hidden rounded-top inventory-spotlight" data-inventory-image="{{ url_for('static', filename=dashboard_images.inventory) }}" style="height: 180px;">
+            <div class="position-absolute top-0 start-0 w-100 h-100" style="background: linear-gradient(180deg, rgba(11,19,18,0.10), rgba(11,19,18,0.55));"></div>
+            <div class="position-absolute bottom-0 start-0 p-3 text-white">
+              <div class="small text-uppercase fw-bold opacity-75">Live Inventory</div>
+              <div class="h5 mb-0">Stock performance</div>
+            </div>
+          </div>
+          <div class="p-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <strong>Available stock</strong>
+              <span class="badge bg-success-subtle text-success-emphasis">{{ '{:,.2f}'.format(stats.stock) }} KG</span>
+            </div>
+            <p class="small text-muted mb-0">Warehouse stock levels update from the latest stock movement and sales activity.</p>
+          </div>
+        </div>
+      </div>
+
       <!-- Low Stock Products -->
       <div class="card">
         <div class="card-body">
@@ -513,40 +533,6 @@
   </div>
 </div>
 
-{% if session.get('role') == 'ADMIN' %}
-<section class="dashboard-imagery card mt-3" id="dashboard-imagery">
-  <div class="card-body">
-    <div class="panel-title">
-      <div>
-        <span class="eyebrow">DASHBOARD SETTINGS</span>
-        <h5>Dashboard imagery</h5>
-        <p class="text-muted small mb-0">Upload your own JPG, PNG or WEBP images (maximum 2 MB each).</p>
-      </div>
-    </div>
-    <div class="image-manager-grid">
-      {% for slot,title,description in [('hero','Hero image','Main image on the executive overview.'),('inventory','Inventory image','Image used for the live stock card.'),('delivery','Delivery image','Reserved for delivery and operations panels.')] %}
-      <article class="image-manager-item">
-        <img src="{{url_for('static',filename=dashboard_images[slot])}}" alt="Current {{title|lower}}">
-        <div>
-          <strong>{{title}}</strong>
-          <small>{{description}}</small>
-        </div>
-        <form method="post" action="{{url_for('update_dashboard_image')}}" enctype="multipart/form-data">
-          <input type="hidden" name="slot" value="{{slot}}">{{csrf_input()}}
-          <input class="form-control form-control-sm" type="file" name="image" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" required>
-          <button class="btn btn-sm btn-primary" type="submit"><i class="bi bi-upload"></i> Upload</button>
-        </form>
-        <form method="post" action="{{url_for('update_dashboard_image')}}">
-          <input type="hidden" name="slot" value="{{slot}}">
-          <input type="hidden" name="action" value="reset">{{csrf_input()}}
-          <button class="btn btn-sm btn-link" type="submit">Restore default</button>
-        </form>
-      </article>
-      {% endfor %}
-    </div>
-  </div>
-</section>
-{% endif %}
 
 {% endblock %}
 
@@ -557,21 +543,34 @@ if (dashboardDate) {
   dashboardDate.textContent = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }).format(new Date());
 }
 
-// Sales Overview Area Chart
+const heroBanner = document.querySelector('.welcome-hero-banner');
+if (heroBanner && heroBanner.dataset.heroImage) {
+  heroBanner.style.setProperty('--dashboard-hero-image', 'url("' + heroBanner.dataset.heroImage + '")');
+}
+
+const inventorySpotlight = document.querySelector('.inventory-spotlight');
+if (inventorySpotlight && inventorySpotlight.dataset.inventoryImage) {
+  inventorySpotlight.style.background = 'url("' + inventorySpotlight.dataset.inventoryImage + '") center/cover no-repeat';
+}
+
+const chartDataEl = document.getElementById('dashboardChartData');
+const rawMonthlySales = chartDataEl && chartDataEl.dataset.monthlySales ? JSON.parse(chartDataEl.dataset.monthlySales) : [];
+const rawMonthlyPurchases = chartDataEl && chartDataEl.dataset.monthlyPurchases ? JSON.parse(chartDataEl.dataset.monthlyPurchases) : [];
+
 const overviewCanvas = document.getElementById('overviewChart');
 if (overviewCanvas) {
-  const chartLabels = [{% for row in monthly_sales|reverse %}'{{row.month}}'{% if not loop.last %},{% endif %}{% endfor %}];
-  const salesData = [{% for row in monthly_sales|reverse %}{{row.revenue|float}}{% if not loop.last %},{% endif %}{% endfor %}];
-  const purchaseData = [{% for row in monthly_purchases|reverse %}{{row.cost|float}}{% if not loop.last %},{% endif %}{% endfor %}];
+  const chartLabels = rawMonthlySales.length ? rawMonthlySales.map(item => item.month) : ['Sep 1', 'Sep 5', 'Sep 10', 'Sep 15', 'Sep 20', 'Sep 25', 'Sep 30'];
+  const salesData = rawMonthlySales.length ? rawMonthlySales.map(item => Number(item.revenue || 0)) : [5000, 8000, 6500, 11000, 7500, 9200, 14000];
+  const purchaseData = rawMonthlyPurchases.length ? rawMonthlyPurchases.map(item => Number(item.cost || 0)) : [4200, 5800, 7000, 6800, 7600, 9500, 11000];
 
   new Chart(overviewCanvas, {
     type: 'line',
     data: {
-      labels: chartLabels.length ? chartLabels : ['Sep 1', 'Sep 5', 'Sep 10', 'Sep 15', 'Sep 20', 'Sep 25', 'Sep 30'],
+      labels: chartLabels,
       datasets: [
         {
           label: 'Sales (GHS)',
-          data: salesData.length ? salesData : [5000, 8000, 6500, 11000, 7500, 9200, 14000],
+          data: salesData,
           borderColor: '#16a34a',
           backgroundColor: 'rgba(22, 163, 74, 0.12)',
           fill: true,
@@ -579,6 +578,17 @@ if (overviewCanvas) {
           borderWidth: 2.5,
           pointBackgroundColor: '#16a34a',
           pointRadius: 4
+        },
+        {
+          label: 'Purchases (GHS)',
+          data: purchaseData,
+          borderColor: '#0f766e',
+          backgroundColor: 'rgba(15, 118, 110, 0.10)',
+          fill: false,
+          tension: 0.28,
+          borderWidth: 1.5,
+          pointBackgroundColor: '#0f766e',
+          pointRadius: 3
         }
       ]
     },
@@ -603,7 +613,6 @@ if (overviewCanvas) {
   });
 }
 
-// Sales by Product Donut Chart
 const productCanvas = document.getElementById('productChart');
 if (productCanvas) {
   new Chart(productCanvas, {
@@ -628,4 +637,5 @@ if (productCanvas) {
   });
 }
 </script>
+<div id="dashboardChartData" data-monthly-sales='{{ monthly_sales|tojson|safe }}' data-monthly-purchases='{{ monthly_purchases|tojson|safe }}' hidden></div>
 {% endblock %}
